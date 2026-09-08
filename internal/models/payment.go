@@ -27,7 +27,7 @@ type FailedPayment struct {
 	Currency           string       `gorm:"not null" json:"currency"`
 	Status				string		`gorm:"not null;default:'pending'" json:"status"`
 	FailureReason		string		`json:"failure_reason"`
-	RetryCount			int			`json:"default:0" json:"retry_count"`
+	RetryCount			int			`gorm:"default:0" json:"retry_count"`
 	NextTryAt			*time.Time	`json:"next_try_at"`
 	CreatedAt			time.Time	`json:"created_at"`
 	UpdatedAt			time.Time	`json:"updated_at"`
