@@ -24,6 +24,7 @@ type GatewayAccount struct {
 	WebhookSecret	string			 `json:"-"`
 	IsActive		bool			 `gorm:"default:true" json:"is_active"`
 	ConnectedAt		time.Time		 `json:"connected_at"`
+	UpdatedAt 		time.Time 		 `json:"updated_at"`
 
 	User  User	`gorm:"foreignKey:UserID" json:"-"`
 }
