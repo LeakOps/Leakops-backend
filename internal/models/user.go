@@ -7,12 +7,21 @@ import (
 	"gorm.io/gorm"
 )
 
+type AuthProvider string
+
+const (
+	ProviderEmail	AuthProvider = "email"
+	ProviderGoogle	AuthProvider = "google"
+	ProviderGithub	AuthProvider = "github"
+)
 
 type User struct {
 	ID				uuid.UUID		`gorm:"type:uuid;primaryKey" json:"id"`
 	Name			string			`gorm:"not null" json:"name"`
 	Email			string			`gorm:"uniqueIndex;not null" json:"email"`
-	PasswordHash	string			`gorm:"not null" json:"-"`
+	PasswordHash	string			`json:"-"`
+	Provider     	AuthProvider 	`gorm:"not null;default:'email'" json:"provider"`
+	ProviderID   	string       	`json:"-"` // Google/GitHub Unique user ID
 	CreatedAt		time.Time		`json:"created_at"`
 	UpdatedAt		time.Time		`json:"updated_at"`
 	
@@ -20,7 +29,6 @@ type User struct {
 }
 
 func (u *User) BeforeCreate(tx *gorm.DB) (err error) {
-
 	if u.ID == uuid.Nil {
 		u.ID = uuid.New()
 	}
