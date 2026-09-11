@@ -21,6 +21,14 @@ type Config struct {
 	StripeWebhookSecret 	string
 
 	ResendAPIKey			string
+
+	GoogleClientID     		string
+	GoogleClientSecret 		string
+	GoogleRedirectURL  		string
+
+	GithubClientID     		string
+	GithubClientSecret 		string
+	GithubRedirectURL  		string
 }
 
 
@@ -66,6 +74,16 @@ func LoadConfig() *Config {
 
 		//Resend Email
 		ResendAPIKey: os.Getenv("RESEND_API_KEY"),
+
+		// Google auth
+		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
+		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
+		GoogleRedirectURL:  "http://127.0.0.1:8080/api/v1/auth/google/callback",
+
+		// Github auth
+		GithubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
+		GithubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
+		GithubRedirectURL:  "http://127.0.0.1:8080/api/v1/auth/github/callback",
 	}
 
 	if cfg.DatabaseURL == "" {
