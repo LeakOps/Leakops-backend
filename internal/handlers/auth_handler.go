@@ -115,7 +115,7 @@ func (h *AuthHandler) Signup(c *fiber.Ctx) error {
 }
 
 
-func (h* AuthHandler) login(c *fiber.Ctx) error {
+func (h *AuthHandler) Login(c *fiber.Ctx) error {
 	var req LoginRequest
 
 	if err := c.BodyParser(&req); err != nil {
