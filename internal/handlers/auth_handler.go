@@ -113,3 +113,52 @@ func (h *AuthHandler) Signup(c *fiber.Ctx) error {
 		},
 	})
 }
+
+
+func (h* AuthHandler) login(c *fiber.Ctx) error {
+	var req LoginRequest
+
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	if req.Email == "" || req.Password == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "invalid email or password",
+		})
+	}
+
+	var user models.User
+	result := h.DB.Where("email = ? AND provider = ?", req.Email, models.ProviderEmail).First(&user)
+
+	if result.RowsAffected == 0 {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "invalid email or password",
+		})
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash),  []byte(req.Password)); err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "invalid email or password",
+		})
+	}
+
+	token, err := h.generateToken(user.ID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to generate token",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"token": token,
+		"user": fiber.Map{
+			"id": user.ID,
+			"name": user.Name,
+			"email": user.Email,
+		},
+	})
+}
+
