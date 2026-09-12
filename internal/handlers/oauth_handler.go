@@ -289,4 +289,29 @@ func (h *OAuthHandler) fetchGithubEmail(ctx context.Context, client *http.Client
 	if resp.StatusCode != http.StatusOK {
 		return ""
 	}
+
+	var emails []struct {
+		Email 		string		`json:"email"`
+		Primary		bool		`json:"primary"`
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return ""
+	}
+	if err := json.Unmarshal(body &emails); err != nil {
+		return ""
+	}
+
+	for _, e := range emails {
+		if e.Primary {
+			return e.Email
+		}
+	}
+	if len(emails) > 0 {
+		return emails[0].Email
+	}
+	return ""
 }
+
+
+// --- Shared logic ---
