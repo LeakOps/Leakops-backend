@@ -72,7 +72,7 @@ func (h *OAuthHandler) GoogleLogin(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to start oauth flow"})
 	}
  
-	
+
 	// Storing cookie in httpOnly to verify callback
 	c.Cookie(&fiber.Cookie{
 		Name:     "oauth_state_google",
@@ -154,4 +154,88 @@ func (h *OAuthHandler) GoogleCallback(c *fiber.Ctx) error {
 	}
 
 	return h.findOrCreateOAuthUser(c, info.Email, info.Name, info.ID, models.ProviderGoogle)
+}
+
+
+// --- GitHub ---
+
+func (h *OAuthHandler) GithubLogin(c *fiber.Ctx) error {
+	state, err := generateState()
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to start oauth flow",
+		})
+	}
+
+	c.Cookie(&fiber.Cookie{
+		Name:  		"oauth_state_github",
+		Value: 		state,
+		Expires: 	time.Now().Add(10 *time.Minute),
+		HTTPOnly: 	true,
+		Secure: 	true,
+		SameSite: 	"Lax",
+	})
+
+	url := h.GithubConfig.AuthCodeURL(state)
+	return c.Redirect(url)
+}
+
+type githubUserInfo struct {
+	Login 		string		`json:"login"`
+	Name		string		`json:"name"`
+	ID 			int			`json:"id"`
+	Email		string		`json:"email"`
+}
+
+func (h *OAuthHandler) GithubCallback(c *fiber.Ctx) error {
+	code := c.Query("code")
+
+	if code == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "missing code",
+		})
+	}
+
+	state := c.Query("state")
+	cookieState := c.Cookies("oauth_state_github")
+
+	if state == "" || cookieState == "" || state != cookieState {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid oauth state",
+		})
+	}
+	c.ClearCookie("oauth_state_github")
+
+	ctx, cancel := context.WithTimeout(context.Background(), oauthCallTimeout)
+	defer cancel()
+
+	token, err := h.GithubConfig.Exchange(ctx, code)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to exchange token",
+		})
+	}
+
+	client := h.GithubConfig.Client(ctx, token)
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user", nil)
+
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to build request",
+		})
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to fetch user info",
+		})
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "github userinfo request failed",
+		})
+	}
 }
