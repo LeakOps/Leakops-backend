@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"Leakops-backend/internal/config"
@@ -237,5 +238,55 @@ func (h *OAuthHandler) GithubCallback(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "github userinfo request failed",
 		})
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to read user info",
+		})
+	}
+
+	var info githubUserInfo
+	if err := json.Unmarshal(body &info); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to parse user info",
+		})
+	}
+
+	email := info.Email
+	if email == "" {
+		email = h.fetchGithubEmail(ctx, client)
+	}
+
+	name := info.Name
+	if name == "" {
+		name = info.Login
+	}
+
+	// BUG FIX: string(rune(info.ID)) was incorrect — it converts the integer
+	// into a Unicode code point instead of its string representation.
+	// Example: ID=12345 -> string(rune(12345)) = "ြ" (garbage), NOT "12345".
+	providerID := strconv.Itoa(info.ID)
+
+	return h.findOrCreateOAuthUser(c, email, name, providerID, models.ProviderGithub)
+}
+
+
+func (h *OAuthHandler) fetchGithubEmail(ctx context.Context, client *http.Client) string {
+	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user/emails", nil)
+
+	if err != nil {
+		return ""
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return ""
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return ""
 	}
 }
