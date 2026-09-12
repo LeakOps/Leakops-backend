@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -248,7 +249,7 @@ func (h *OAuthHandler) GithubCallback(c *fiber.Ctx) error {
 	}
 
 	var info githubUserInfo
-	if err := json.Unmarshal(body &info); err != nil {
+	if err := json.Unmarshal(body, &info); err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to parse user info",
 		})
@@ -298,7 +299,7 @@ func (h *OAuthHandler) fetchGithubEmail(ctx context.Context, client *http.Client
 	if err != nil {
 		return ""
 	}
-	if err := json.Unmarshal(body &emails); err != nil {
+	if err := json.Unmarshal(body, &emails); err != nil {
 		return ""
 	}
 
@@ -315,3 +316,43 @@ func (h *OAuthHandler) fetchGithubEmail(ctx context.Context, client *http.Client
 
 
 // --- Shared logic ---
+
+func (h *OAuthHandler) findOrCreateOAuthUser(c *fiber.Ctx, email, name, providerID string, provider models.AuthProvider) error {
+	if email == "" || providerID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "oauth provider returned incomplete user information",
+		})
+	}
+
+	var user models.User
+	result := h.DB.Where("email = ?", email).First(&user)
+
+	if result.RowsAffected == 0 {
+		// make a new user
+		user = models.User{
+			Name: 		name,
+			Email: 		email,
+			Provider: 	provider,
+			ProviderID: providerID,
+		}
+
+		if err := h.DB.Create(&user).Error; err != nil {
+			c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "failed to create user",
+			})
+		}
+	}
+
+	authHandler := &AuthHandler{DB: h.DB, JWTSecret: h.JWTSecret}
+	token, err := authHandler.generateToken(user.ID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to generate token",
+		})
+	}
+
+	// Frontend ko redirect karo token ke saath (query param mein)
+	redirectURL := fmt.Sprintf("%s/auth/callback?token=%s", h.FrontendURL, token)
+	return c.Redirect(redirectURL)
+}
+
