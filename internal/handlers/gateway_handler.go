@@ -90,7 +90,7 @@ func (h* GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 
 	encryptedWebhookSecret := ""
 	if req.WebhookSecret != "" {
-		encryptedWebhookSecret, err := utils.Encrypt(req.WebhookSecret, h.EncryptionKey)
+		encryptedWebhookSecret, err = utils.Encrypt(req.WebhookSecret, h.EncryptionKey)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "failed to secure webhook secret",
