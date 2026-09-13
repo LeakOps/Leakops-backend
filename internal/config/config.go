@@ -29,6 +29,8 @@ type Config struct {
 	GithubClientID     		string
 	GithubClientSecret 		string
 	GithubRedirectURL  		string
+
+	EncryptionKey 			string
 }
 
 
@@ -84,6 +86,9 @@ func LoadConfig() *Config {
 		GithubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
 		GithubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
 		GithubRedirectURL:  "http://127.0.0.1:8080/api/v1/auth/github/callback",
+
+		// Encryption
+		EncryptionKey: os.Getenv("ENCRYPTION_KEY"),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -92,6 +97,10 @@ func LoadConfig() *Config {
 
 	if cfg.JWTSecret == "" {
 		log.Fatal("JWT_SECRET is not set in .env")
+	}
+
+	if len(cfg.EncryptionKey) != 32 {
+		log.Fatal("ENCRYPTION_KEY must be exactly 32 characters")
 	}
 
 	return cfg
