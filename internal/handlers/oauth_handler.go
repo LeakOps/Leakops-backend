@@ -16,6 +16,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"golang.org/x/oauth2"
+	"golang.org/x/oauth2/google"
 	"golang.org/x/oauth2/github"
 	"gorm.io/gorm"
 )
@@ -37,7 +38,7 @@ func NewOAuthHandler(db *gorm.DB, cfg *config.Config) *OAuthHandler {
 		ClientSecret: cfg.GoogleClientSecret,
 		RedirectURL:  "http://127.0.0.1:8080/api/v1/auth/google/callback",
 		Scopes:       []string{"https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"},
-		Endpoint:     github.Endpoint,
+		Endpoint:     google.Endpoint,
 	}
 
 	githubConfig := &oauth2.Config{
