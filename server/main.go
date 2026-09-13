@@ -6,6 +6,7 @@ import (
 	"Leakops-backend/internal/config"
 	"Leakops-backend/internal/db"
 	"Leakops-backend/internal/middlewares"
+	"Leakops-backend/internal/routes"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
@@ -16,7 +17,7 @@ func main() {
 	cfg := config.LoadConfig()
 
 	// Connect to database + auto-migrate models
-	_ = db.ConnectDB(cfg.DatabaseURL)
+	database := db.ConnectDB(cfg.DatabaseURL)
 
 	// Create a fiber app
 	app := fiber.New()
@@ -29,8 +30,8 @@ func main() {
 	})
 
 	// Register all Routes
+	routes.SetupRoutes(app, database, cfg)
 
-	
 	log.Println("Leakops backend listening on port :" + cfg.PORT)
 	log.Fatal(app.Listen(":" + cfg.PORT))
 }
