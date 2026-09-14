@@ -1,6 +1,6 @@
 package routes
 
-import(
+import (
 	"Leakops-backend/internal/config"
 	"Leakops-backend/internal/handlers"
 
@@ -15,10 +15,12 @@ func SetupRoutes(app *fiber.App, database *gorm.DB, cfg *config.Config) {
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(database, cfg.JWTSecret)
 	oauthHandler := handlers.NewOAuthHandler(database, cfg)
+	gatewayHandler := handlers.NewGatewayHandler(database, cfg.EncryptionKey)
 
 	
 	// Register route groups
 	RegisterAuthRoutes(api, authHandler)
 	RegisterOAuthRoutes(api, oauthHandler)
+	RegisterGatewayRoutes(api, gatewayHandler, cfg.JWTSecret)
 }
 
