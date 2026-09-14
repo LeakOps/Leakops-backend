@@ -1,6 +1,5 @@
 package gateway
 
-
 // ParsedWebhookEvent is a common format in which every gateway (Stripe, Dodo, Razorpay) convert their webhook data.
 
 type ParsedWebhookEvent struct {
