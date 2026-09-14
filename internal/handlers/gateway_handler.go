@@ -151,3 +151,28 @@ func (h* GatewayHandler) ListGateways(c* fiber.Ctx) error {
 }
 
 
+func (h* GatewayHandler) DisconnectGateway(c* fiber.Ctx) error {
+	userID, err := getUserID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	gatewayID := c.Params("id")
+
+	result := h.DB.Where("id = ? AND user_id = ?", gatewayID, userID).Delete(&models.GatewayAccount{})
+	if result.Error != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to disconnect gateway",
+		})
+	}
+
+	if result.RowsAffected == 0 {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "gateway not found",
+		})
+	}
+
+	return c.JSON(fiber.Map{"message": "gateway disconnected"})
+}
