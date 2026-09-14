@@ -121,3 +121,33 @@ func (h* GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 		},
 	})
 }
+
+func (h* GatewayHandler) ListGateways(c* fiber.Ctx) error {
+	userID, err := getUserID(c)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+
+	var gateways []models.GatewayAccount
+	if err := h.DB.Where("user_id = ?", userID).Find(&gateways).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to fetch gateways",
+		})
+	}
+
+	response := make([]fiber.Map, 0)
+	for _, g := range gateways {
+		response = append(response, fiber.Map{
+			"id":  				g.ID,
+			"gateway_type": 	g.GatewayType,
+			"is_active":		g.IsActive,
+			"connected_at":		g.ConnectedAt,
+		})
+	}
+
+	return c.JSON(fiber.Map{"gateways": response})
+}
+
+
