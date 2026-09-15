@@ -1,17 +1,14 @@
 package models
 
-import(
+import (
 	"time"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-// GatewayType — UPDATE: defined as an enum type so that
-// `models.GatewayDodo` / `models.GatewayStripe` compile correctly in
-// gateway_handler.go, and invalid string literals ("strip", "Dodo", etc.)
-// are caught at compile time through type checking.
-
+// GatewayType is an enum so `models.GatewayDodo` / `models.GatewayStripe`
+// compile correctly and typos ("strip", "Dodo") are caught by the type checker.
 type GatewayType string
 
 const (
@@ -20,40 +17,41 @@ const (
 )
 
 // GatewayAccount represents a founder's connected Stripe/Dodo account.
-// BYOK (Bring Your Own Key) model: the founder provides their own API key,
-// while the webhook secret is provided later through the SetWebhookSecret
-// step. Both values are stored encrypted.
 //
-// NOTE: The field names here must match gateway_handler.go
-// (APIKey, WebhookSecret, ConnectedAt). The names do not have an
-// "Encrypted" suffix, but the values stored in these fields must always
-// be encrypted using utils.Encrypt.
+// BYOK: the founder supplies their own API key at connect time; the webhook
+// secret arrives later via SetWebhookSecret. Both are stored encrypted.
 //
-// Never store plaintext values in these fields.
-
+// NOTE: field names must stay in sync with gateway_handler.go (APIKey,
+// WebhookSecret, ConnectedAt). They have no "Encrypted" suffix, but the values
+// stored MUST always go through utils.Encrypt. Never store plaintext here.
 type GatewayAccount struct {
-	ID          	uuid.UUID   	 `gorm:"type:uuid;primaryKey" json:"id"`
-	UserID      	uuid.UUID   	 `gorm:"type:uuid;not null;index" json:"user_id"`
-	GatewayType 	GatewayType 	 `gorm:"not null" json:"gateway_type"`
-	APIKey        	string 		     `gorm:"not null" json:"-"` // encrypted
-	WebhookSecret 	string 			 `json:"-"`// encrypted; empty unless there is SetWebhookSecret inside it
+	ID uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 
-	// Last few chars of the raw API key, so the UI can show which key is
-	// connected without ever re-displaying the full secret.
-	APIKeyLastFour 	string		     `json:"api_key_last_four"`
+	// FIX: composite unique index added. The duplicate check in ConnectGateway
+	// is a SELECT-then-INSERT, which two concurrent requests can both pass.
+	// The DB constraint is the only real guarantee of one account per
+	// (user, gateway type).
+	UserID      uuid.UUID   `gorm:"type:uuid;not null;index;uniqueIndex:idx_user_gateway_type" json:"user_id"`
+	GatewayType GatewayType `gorm:"not null;uniqueIndex:idx_user_gateway_type" json:"gateway_type"`
 
-	IsActive    	bool 			 `gorm:"default:false" json:"is_active"`
-	ConnectedAt 	time.Time		 `json:"connected_at"`
-	UpdatedAt   	time.Time		 `json:"updated_at"`
+	APIKey        string `gorm:"not null" json:"-"` // encrypted
+	WebhookSecret string `json:"-"`                 // encrypted; empty until SetWebhookSecret
 
-	User  User	`gorm:"foreignKey:UserID" json:"-"`
+	// Last 4 chars of the raw API key so the UI can show which key is connected
+	// without ever re-displaying the secret.
+	APIKeyLastFour string `json:"api_key_last_four"`
+
+	IsActive    bool      `gorm:"default:false;index" json:"is_active"`
+	ConnectedAt time.Time `json:"connected_at"`
+	UpdatedAt   time.Time `json:"updated_at"`
+
+	User User `gorm:"foreignKey:UserID" json:"-"`
 }
 
 func (g *GatewayAccount) BeforeCreate(tx *gorm.DB) (err error) {
 	if g.ID == uuid.Nil {
 		g.ID = uuid.New()
 	}
-
 	return
 }
 
