@@ -2,9 +2,12 @@
 package handlers
 
 import (
+	"errors"
+	"strings"
+	"time"
+
 	"Leakops-backend/internal/models"
 	"Leakops-backend/internal/utils"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -26,6 +29,11 @@ type ConnectGatewayRequest struct {
 	WebhookSecret string `json:"webhook_secret"`
 }
 
+// minAPIKeyLength guards the APIKeyLastFour slice below. Without it, a 3-char
+// key would be stored in full as "last four" — i.e. the whole secret sitting in
+// plaintext in a column meant to be safe to display.
+const minAPIKeyLength = 8
+
 // getUserID safely pulls the authenticated user's ID out of locals.
 // Panic-proof: if middleware locals is not set, it returns 401.
 func getUserID(c *fiber.Ctx) (uuid.UUID, error) {
@@ -46,7 +54,7 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 	userID, err := getUserID(c)
 	if err != nil {
 		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
-			"error": "invalid user",
+			"error": "unauthorized",
 		})
 	}
 
@@ -56,6 +64,10 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 			"error": "invalid request body",
 		})
 	}
+
+	req.GatewayType = strings.ToLower(strings.TrimSpace(req.GatewayType))
+	req.APIKey = strings.TrimSpace(req.APIKey)
+	req.WebhookSecret = strings.TrimSpace(req.WebhookSecret)
 
 	if req.GatewayType != string(models.GatewayDodo) && req.GatewayType != string(models.GatewayStripe) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -69,17 +81,32 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 		})
 	}
 
+	if len(req.APIKey) < minAPIKeyLength {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "api_key looks invalid",
+		})
+	}
+
 	// Duplicate check: same user, same gateway type already connected?
+	//
+	// FIX: previously only `err == nil` was handled. Any other error (DB down,
+	// connection reset) was silently swallowed and the code carried on to create
+	// a second row. Now non-"not found" errors return 500.
 	var existing models.GatewayAccount
 	err = h.DB.Where("user_id = ? AND gateway_type = ?", userID, req.GatewayType).First(&existing).Error
+
 	if err == nil {
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error": "gateway already connected, disconnect it first",
 		})
 	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to connect gateway",
+		})
+	}
 
-	// TODO: A validation call should be made to the gateway API here
-	// to verify that the key is valid. Skip it for now and add it later.
+	// TODO: validate the key against the gateway API here before storing it.
 
 	encryptedKey, err := utils.Encrypt(req.APIKey, h.EncryptionKey)
 	if err != nil {
@@ -88,10 +115,7 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 		})
 	}
 
-	lastFour := req.APIKey
-	if len(lastFour) > 4 {
-		lastFour = lastFour[len(lastFour)-4:]
-	}
+	lastFour := req.APIKey[len(req.APIKey)-4:]
 
 	encryptedWebhookSecret := ""
 	if req.WebhookSecret != "" {
@@ -109,21 +133,21 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 		APIKey:         encryptedKey,
 		APIKeyLastFour: lastFour,
 		WebhookSecret:  encryptedWebhookSecret,
-		// FIX: Previously, this was always set to `true`, regardless of whether
-		// WebhookSecret was empty or not. This caused webhook_handler.go (which
-		// searches for accounts using the `is_active = true` filter) to match
-		// this account. However, since WebhookSecret was empty, signature
-		// verification could fail or crash when calling Decrypt("") or deriving
-		// the HMAC key. Now, IsActive will only be set to true if a webhook
-		// secret is provided in this request. Otherwise, the account will be
-		// activated later through the SetWebhookSecret endpoint (see below).
-		IsActive:    req.WebhookSecret != "",
+		// FIX: this used to be hardcoded `true`. webhook_handler.go looks up
+		// accounts with `is_active = true`, so an account with an EMPTY webhook
+		// secret would match and then blow up inside Decrypt("") / HMAC key
+		// derivation. IsActive is now true only when a secret actually exists;
+		// otherwise SetWebhookSecret activates it later.
+		IsActive:    encryptedWebhookSecret != "",
 		ConnectedAt: time.Now(),
 	}
 
 	if err := h.DB.Create(&gatewayAccount).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to connect gateway",
+		// The composite unique index on (user_id, gateway_type) is the real
+		// guarantee against duplicates — the SELECT above can lose a race
+		// between two concurrent requests. Report that race as a 409, not a 500.
+		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+			"error": "gateway already connected, disconnect it first",
 		})
 	}
 
@@ -133,9 +157,8 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 			"id":           gatewayAccount.ID,
 			"gateway_type": gatewayAccount.GatewayType,
 			"is_active":    gatewayAccount.IsActive,
-			// The founder will register this URL in their Stripe/Dodo dashboard.
-			// They will then receive a webhook secret, which must be sent back
-			// through the SetWebhookSecret endpoint.
+			// The founder registers this URL in their Stripe/Dodo dashboard,
+			// gets a signing secret back, and posts it to SetWebhookSecret.
 			"webhook_url": "/api/v1/webhook/" + string(gatewayAccount.GatewayType) + "/" + gatewayAccount.ID.String(),
 		},
 	})
@@ -143,15 +166,12 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 
 // SetWebhookSecret — Step B of the connect flow. The founder registers the
 // webhook_url returned by ConnectGateway in their Stripe/Dodo dashboard,
-// receives a signing secret, and submits it here. This activates the
-// account to receive webhook events.
+// receives a signing secret, and submits it here. This activates the account.
 //
-// FIX: This method was previously missing, so there was no way to set the
-// webhook secret after the account was created. The only option was to
-// provide the secret during ConnectGateway, which is not possible in the
-// correct order because the secret is only generated after the webhook URL
-// has already been registered.
-
+// FIX: this method did not exist before, so there was no way to set the secret
+// after account creation — and supplying it during ConnectGateway is impossible
+// in the correct order, since the secret only exists after the webhook URL has
+// been registered.
 func (h *GatewayHandler) SetWebhookSecret(c *fiber.Ctx) error {
 	userID, err := getUserID(c)
 	if err != nil {
@@ -160,21 +180,36 @@ func (h *GatewayHandler) SetWebhookSecret(c *fiber.Ctx) error {
 		})
 	}
 
-	gatewayID := c.Params("id")
+	// FIX: parse the path param instead of passing a raw string into the query.
+	// A malformed uuid otherwise reaches Postgres and produces a 500 from an
+	// invalid-input-syntax error instead of a clean 404.
+	gatewayID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid gateway id",
+		})
+	}
 
 	var req struct {
 		WebhookSecret string `json:"webhook_secret"`
 	}
-	if err := c.BodyParser(&req); err != nil || req.WebhookSecret == "" {
+	if err := c.BodyParser(&req); err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid request body",
+		})
+	}
+
+	req.WebhookSecret = strings.TrimSpace(req.WebhookSecret)
+	if req.WebhookSecret == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "webhook_secret is required",
 		})
 	}
 
 	var gatewayAccount models.GatewayAccount
-	// user_id is also being validated. Otherwise, any authenticated user could
-	// guess another founder's gatewayID and overwrite their webhook secret,
-	// resulting in an IDOR vulnerability.
+	// user_id is part of the WHERE clause on purpose. Without it any
+	// authenticated user could guess another founder's gatewayID and overwrite
+	// their webhook secret — a classic IDOR.
 	if err := h.DB.Where("id = ? AND user_id = ?", gatewayID, userID).First(&gatewayAccount).Error; err != nil {
 		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
 			"error": "gateway not found",
@@ -188,10 +223,13 @@ func (h *GatewayHandler) SetWebhookSecret(c *fiber.Ctx) error {
 		})
 	}
 
-	gatewayAccount.WebhookSecret = encryptedSecret
-	gatewayAccount.IsActive = true
-
-	if err := h.DB.Save(&gatewayAccount).Error; err != nil {
+	// Targeted UPDATE instead of Save(&struct). Save writes every column, which
+	// would also rewrite APIKey/ConnectedAt and could clobber a concurrent
+	// change. Only the two fields that actually change are touched here.
+	if err := h.DB.Model(&gatewayAccount).Updates(map[string]interface{}{
+		"webhook_secret": encryptedSecret,
+		"is_active":      true,
+	}).Error; err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to save webhook secret",
 		})
@@ -200,7 +238,7 @@ func (h *GatewayHandler) SetWebhookSecret(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"message":   "webhook secret saved, gateway is now active",
 		"id":        gatewayAccount.ID,
-		"is_active": gatewayAccount.IsActive,
+		"is_active": true,
 	})
 }
 
@@ -219,7 +257,7 @@ func (h *GatewayHandler) ListGateways(c *fiber.Ctx) error {
 		})
 	}
 
-	response := make([]fiber.Map, 0)
+	response := make([]fiber.Map, 0, len(gateways))
 	for _, g := range gateways {
 		response = append(response, fiber.Map{
 			"id":           g.ID,
@@ -241,7 +279,12 @@ func (h *GatewayHandler) DisconnectGateway(c *fiber.Ctx) error {
 		})
 	}
 
-	gatewayID := c.Params("id")
+	gatewayID, err := uuid.Parse(c.Params("id"))
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "invalid gateway id",
+		})
+	}
 
 	result := h.DB.Where("id = ? AND user_id = ?", gatewayID, userID).Delete(&models.GatewayAccount{})
 	if result.Error != nil {
