@@ -1,6 +1,6 @@
 package routes
 
-import(
+import (
 	"Leakops-backend/internal/handlers"
 	"Leakops-backend/internal/middlewares"
 
@@ -12,5 +12,6 @@ func RegisterGatewayRoutes(router fiber.Router, h *handlers.GatewayHandler, jwtS
 
 	gateway.Post("/connect", h.ConnectGateway)
 	gateway.Get("/", h.ListGateways)
+	gateway.Put("/:id/webhook-secret", h.SetWebhookSecret)
 	gateway.Delete("/:id", h.DisconnectGateway)
 }
