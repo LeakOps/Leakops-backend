@@ -76,4 +76,96 @@ func(h* WebhookHandler) HandleWebhook(c *fiber.Ctx) error {
 	}
 
 	gw, err := gateway.GetGateway(gatewayTypeStr)
+	if err != nil {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "unsupported gateway",
+		})
+	}
+
+	// Stripe needs one header; Dodo needs the three Standard Webhooks headers.
+	// A map keeps the interface uniform — each gateway picks what it needs.
+	headers := map[string]string {
+		"Stripe-Signature": c.Get("Stripe-Signature"),
+		"webhook-id": c.Get("webhook-id"),
+		"webhook-signature": c.Get("webhook-signature"),
+		"webhook-timestamp": c.Get("webhook-timestamp"),
+	}
+
+	parsedEvent, err := gw.VerifyAndParseWebhook(c.Body(), headers, webhookSecret)
+	if err != nil {
+		// FIX: err.Error() used to be echoed back to the caller, leaking internal
+		// verification details to anyone probing the endpoint. Log it, return a
+		// generic message.
+		log.Printf("webhook: verification failed account=%s gateway=%s: %v", accountID, gatewayTypeStr, err)
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "webhook verification failed",
+		})
+	}
+
+	// (nil, nil) = valid but unhandled event type. Reply 200 so Stripe/Dodo
+	// stop retrying and don't disable the endpoint.
+	if parsedEvent == nil {
+		return c.SendStatus(fiber.StatusOK)
+	}
+
+	// Customer find-or-create and FailedPayment create run in ONE transaction.
+	// They used to be two independent writes: if the second failed, the DB was
+	// left inconsistent. Both error returns are also checked now — previously a
+	// failed Create left customer.ID as the zero uuid and the FailedPayment row
+	// was written against it silently.
+	err = h.DB.Transaction(func(tx *gorm.DB) error {
+		var customer models.Customer
+
+		custResult := tx.Where(
+			"gateway_account_id = ? AND external_customer_id = ?",
+			accountID, parsedEvent.ExternalCustomerID,
+		).First(&customer)
+
+		// FIX: custResult.Error was never inspected. On a connection error
+		// RowsAffected is also 0, so the code would happily create a duplicate
+		// customer. Only ErrRecordNotFound may proceed to create.
+		if custResult.Error != nil {
+			if !errors.Is(custResult.Error, gorm.ErrRecordNotFound) {
+				return custResult.Error
+			}
+
+			customer = models.Customer{
+				UserID: 			gatewayAccount.UserID,
+				GatewayAccountID: 	accountID,
+				ExternalCustomerID: parsedEvent.ExternalCustomerID,
+				Email:              parsedEvent.CustomerEmail,
+				Name:               parsedEvent.CustomerName,
+			}
+			if err := tx.Create(&customer).Error; err != nil {
+				return err
+			}
+		}
+
+		// FirstOrCreate keyed on (gateway_account_id, external_invoice_id) makes
+		// duplicate webhook deliveries idempotent.
+		var payment models.FailedPayment
+		return tx.Where(models.FailedPayment {
+			GatewayAccountID:		accountID,
+			ExternalInvoiceID: 		parsedEvent.ExternalInvoiceID,
+		}).FirstOrCreate(&payment, models.FailedPayment{
+			GatewayAccountID:  accountID,
+			ExternalInvoiceID: parsedEvent.ExternalInvoiceID,
+			CustomerID:        customer.ID,
+			AmountCents:       parsedEvent.AmountCents,
+			Currency:          parsedEvent.Currency,
+			Status:            string(models.StatusPending),
+			FailureReason:     parsedEvent.FailureReason,
+		}).Error
+	})
+
+	if err != nil {
+		log.Printf("webhook: persist failed account=%s invoice=%s: %v", accountID, parsedEvent.ExternalInvoiceID, err)
+		// 500 is deliberate here: the signature was valid and this is our fault,
+		// so we want the gateway to retry the delivery.
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to record payment event",
+		})
+	}
+
+	return c.SendStatus(fiber.StatusOK)
 }
