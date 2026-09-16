@@ -16,14 +16,7 @@ const (
 	GatewayDodo   GatewayType = "dodo"
 )
 
-// GatewayAccount represents a founder's connected Stripe/Dodo account.
-//
-// BYOK: the founder supplies their own API key at connect time; the webhook
-// secret arrives later via SetWebhookSecret. Both are stored encrypted.
-//
-// NOTE: field names must stay in sync with gateway_handler.go (APIKey,
-// WebhookSecret, ConnectedAt). They have no "Encrypted" suffix, but the values
-// stored MUST always go through utils.Encrypt. Never store plaintext here.
+
 type GatewayAccount struct {
 	ID uuid.UUID `gorm:"type:uuid;primaryKey" json:"id"`
 
