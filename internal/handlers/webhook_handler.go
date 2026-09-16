@@ -32,7 +32,7 @@ func NewWebhookHandler(db *gorm.DB, encryptionKey string) *WebhookHandler {
 // Fiber param names are case-sensitive — a mismatch here silently yields empty
 // strings rather than an error.
 func(h* WebhookHandler) HandleWebhook(c *fiber.Ctx) error {
-	gatewayTypeStr := strings.ToLower(c.Params("gatwayType")) // "stripe" | "dodo"
+	gatewayTypeStr := strings.ToLower(c.Params("gatewayType")) // "stripe" | "dodo"
 	accountIDStr := c.Params("accountID")
 
 	accountID, err := uuid.Parse(accountIDStr)
