@@ -105,3 +105,31 @@ func (s *StripeGateway) RetryPayment(apiKey string, externalInvoiceID string) er
 
 	return err
 }
+
+// Adding RegisterWebhook URL for stripe
+
+func (s *StripeGateway) RegisterWebhook(apiKey string, webhookURL string) (string, error) {
+	if apiKey == "" {
+		return "", errors.New("missing stripe api key")
+	}
+
+	sc := stripe.NewClient(apiKey)
+
+	params := &stripe.WebhookEndpointCreateParams{
+		URL: stripe.String(webhookURL),
+		EnabledEvents: []*string{
+			stripe.String("invoice.payment_failed"),
+		},
+	}
+
+	endpoint, err := sc.V1WebhookEndpoints.Create(context.Background(), params)
+	if err != nil {
+		return "", err
+	}
+
+	if endpoint.Secret == "" {
+		return "", errors.New("stripe did not return a webhook secret")
+	}
+
+	return endpoint.Secret, nil
+}

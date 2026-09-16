@@ -3,6 +3,7 @@
 package gateway
 
 import (
+	"context"
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/base64"
@@ -11,6 +12,9 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dodopayments/dodopayments-go"
+	"github.com/dodopayments/dodopayments-go/option"
 )
 
 type DodoGateway struct{}
@@ -22,16 +26,6 @@ func NewDodoGateway() *DodoGateway {
 // Compile-time guarantee that DodoGateway satisfies PaymentGateway.
 var _ PaymentGateway = (*DodoGateway)(nil)
 
-// dodoWebhookPayload accepts BOTH shapes of the customer block:
-//
-//	nested : data.customer.{customer_id,email,name}   <- current Dodo format
-//	flat   : data.{customer_id,customer_email,customer_name}
-//
-// FIX: only the flat shape was handled before. If Dodo sends the nested shape,
-// json.Unmarshal does NOT error — the three fields just stay empty strings, and
-// every failed payment gets recorded against a single customer row with an
-// empty external_customer_id. Silent data corruption. Handling both shapes and
-// rejecting an empty id (below) makes that impossible.
 type dodoWebhookPayload struct {
 	Type string `json:"type"`
 
@@ -62,7 +56,7 @@ func (p *dodoWebhookPayload) customerFields() (string, string, string) {
 			p.Data.Customer.Email,
 			p.Data.Customer.Name
 	}
- 
+
 	return p.Data.CustomerID, p.Data.CustomerEmail, p.Data.CustomerName
 }
 
@@ -115,7 +109,7 @@ func (d *DodoGateway) VerifyAndParseWebhook(
 	// Dodo signing secrets are base64. The "whsec_" prefix is not part of the
 	// decoded secret.
 	secret := strings.TrimPrefix(webhookSecret, "whsec_")
- 
+
 	secretBytes, err := base64.StdEncoding.DecodeString(secret)
 	if err != nil {
 		return nil, errors.New("invalid webhook secret")
@@ -126,18 +120,18 @@ func (d *DodoGateway) VerifyAndParseWebhook(
 		return nil, err
 	}
 	expectedSignature := mac.Sum(nil)
- 
+
 	// The webhook-signature header may carry multiple signatures during a
 	// secret rotation. Accept if any v1 signature matches.
 	if !verifyDodoSignature(webhookSignature, expectedSignature) {
 		return nil, errors.New("invalid webhook signature")
 	}
- 
+
 	var event dodoWebhookPayload
 	if err := json.Unmarshal(payload, &event); err != nil {
 		return nil, err
 	}
- 
+
 	// FIX: this used to be `if event.Type != "payment.failed" { }` — an EMPTY
 	// block. It compiles with no warning, so EVERY Dodo event (payment.succeeded,
 	// subscription.active, dispute.opened...) fell through and was returned as
@@ -149,9 +143,9 @@ func (d *DodoGateway) VerifyAndParseWebhook(
 	if event.Type != "payment.failed" {
 		return nil, nil
 	}
- 
+
 	customerID, customerEmail, customerName := event.customerFields()
- 
+
 	// Guard rails: without these two ids the row would be unusable and would
 	// collide with every other malformed event via FirstOrCreate.
 	if customerID == "" {
@@ -160,7 +154,7 @@ func (d *DodoGateway) VerifyAndParseWebhook(
 	if event.Data.PaymentID == "" {
 		return nil, errors.New("dodo webhook missing payment id")
 	}
- 
+
 	return &ParsedWebhookEvent{
 		EventType:          "payment_failed",
 		ExternalInvoiceID:  event.Data.PaymentID,
@@ -172,7 +166,7 @@ func (d *DodoGateway) VerifyAndParseWebhook(
 		FailureReason:      event.Data.ErrorMessage,
 	}, nil
 }
- 
+
 // verifyDodoSignature compares the expected MAC against every v1 signature in
 // the header.
 //
@@ -184,35 +178,35 @@ func (d *DodoGateway) VerifyAndParseWebhook(
 // constant-time for equal-length inputs.
 func verifyDodoSignature(signatureHeader string, expectedSignature []byte) bool {
 	matched := false
- 
+
 	for _, signaturePart := range strings.Fields(signatureHeader) {
 		parts := strings.SplitN(signaturePart, ",", 2)
 		if len(parts) != 2 {
 			continue
 		}
- 
+
 		version := parts[0]
 		signature := parts[1]
- 
+
 		if version != "v1" {
 			continue
 		}
- 
+
 		sigBytes, err := base64.StdEncoding.DecodeString(signature)
 		if err != nil {
 			continue
 		}
- 
+
 		// No early return: keep looping so total work does not depend on which
 		// signature matched.
 		if hmac.Equal(sigBytes, expectedSignature) {
 			matched = true
 		}
 	}
- 
+
 	return matched
 }
- 
+
 func (d *DodoGateway) RetryPayment(apiKey string, externalInvoiceID string) error {
 	// TODO: implement Dodo's payment-retry/recovery API here.
 	//
@@ -224,4 +218,42 @@ func (d *DodoGateway) RetryPayment(apiKey string, externalInvoiceID string) erro
 	// tenant-specific apiKey. Never put the key in package-level/global state
 	// (that is the exact bug that was fixed in stripe.go).
 	return errors.New("dodo payment retry is not implemented")
+}
+
+func (d *DodoGateway) RegisterWebhook(apiKey string, webhookURL string) (string, error) {
+	if apiKey == "" {
+		return "", errors.New("Missing dodo api key")
+	}
+
+	client := dodopayments.NewClient(
+		option.WithBearerToken(apiKey),
+	)
+
+	// Step-1 Create Webhook endpoint
+	webhookDetails, err := client.Webhooks.New(context.Background(), dodopayments.WebhookNewParams{
+		URL:         dodopayments.F(webhookURL),
+		FilterTypes: dodopayments.F([]dodopayments.WebhookEventType{
+			dodopayments.WebhookEventTypePaymentFailed,
+		}),
+	})
+
+	if err != nil {
+		return "", err
+	}
+
+	if webhookDetails.ID == "" {
+		return "", errors.New("dodo did not return a webhook id")
+	}
+
+	// Step 2 Retrieve secrets independently as dodo didn't give it in create response
+	secretResponse, err := client.Webhooks.GetSecret(context.Background(), webhookDetails.ID)
+	if err != nil {
+		return "", err
+	}
+
+	if secretResponse.Secret == "" {
+		return "", errors.New("dodo did not return a webhook secret")
+	}
+
+	return secretResponse.Secret, nil
 }
