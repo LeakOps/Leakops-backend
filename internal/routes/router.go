@@ -15,7 +15,7 @@ func SetupRoutes(app *fiber.App, database *gorm.DB, cfg *config.Config) {
 	// Initialize handlers
 	authHandler := handlers.NewAuthHandler(database, cfg.JWTSecret)
 	oauthHandler := handlers.NewOAuthHandler(database, cfg)
-	gatewayHandler := handlers.NewGatewayHandler(database, cfg.EncryptionKey)
+	gatewayHandler := handlers.NewGatewayHandler(database, cfg.EncryptionKey, cfg.BaseURL)
 	webhookHandler := handlers.NewWebhookHandler(database, cfg.EncryptionKey)
 
 	

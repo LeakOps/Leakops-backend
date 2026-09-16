@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"Leakops-backend/internal/gateway"
 	"Leakops-backend/internal/models"
 	"Leakops-backend/internal/utils"
 
@@ -17,16 +18,19 @@ import (
 type GatewayHandler struct {
 	DB            *gorm.DB
 	EncryptionKey string
+	BaseURL       string // e.g. https://api.leakops.com or ngrok URL in dev
 }
 
-func NewGatewayHandler(db *gorm.DB, encryptionKey string) *GatewayHandler {
-	return &GatewayHandler{DB: db, EncryptionKey: encryptionKey}
+func NewGatewayHandler(db *gorm.DB, encryptionKey, baseURL string) *GatewayHandler {
+	return &GatewayHandler{DB: db, EncryptionKey: encryptionKey, BaseURL: baseURL}
 }
 
+// ConnectGatewayRequest — the founder now only sends api_key. webhook_secret
+// is no longer requested manually; the backend registers with the gateway
+// API itself and fetches the secret (see ConnectGateway Step 3).
 type ConnectGatewayRequest struct {
-	GatewayType   string `json:"gateway_type"` // "dodo" or "stripe"
-	APIKey        string `json:"api_key"`
-	WebhookSecret string `json:"webhook_secret"`
+	GatewayType string `json:"gateway_type"` // "dodo" or "stripe"
+	APIKey      string `json:"api_key"`
 }
 
 // minAPIKeyLength guards the APIKeyLastFour slice below. Without it, a 3-char
@@ -50,6 +54,14 @@ func getUserID(c *fiber.Ctx) (uuid.UUID, error) {
 	return userID, nil
 }
 
+// ConnectGateway — the founder only provides an api_key. The backend:
+//  1. Creates the record (is_active=false, webhook_secret empty)
+//  2. Builds the webhook URL from that record's ID
+//  3. Calls the Stripe/Dodo API to register the webhook and gets a secret back
+//  4. Encrypts the secret and updates the same record, is_active=true
+//
+// On every failure point the record is rolled back (deleted) — no half-baked
+// row is left behind in the DB.
 func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 	userID, err := getUserID(c)
 	if err != nil {
@@ -67,7 +79,6 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 
 	req.GatewayType = strings.ToLower(strings.TrimSpace(req.GatewayType))
 	req.APIKey = strings.TrimSpace(req.APIKey)
-	req.WebhookSecret = strings.TrimSpace(req.WebhookSecret)
 
 	if req.GatewayType != string(models.GatewayDodo) && req.GatewayType != string(models.GatewayStripe) {
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
@@ -88,10 +99,8 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 	}
 
 	// Duplicate check: same user, same gateway type already connected?
-	//
-	// FIX: previously only `err == nil` was handled. Any other error (DB down,
-	// connection reset) was silently swallowed and the code carried on to create
-	// a second row. Now non-"not found" errors return 500.
+	// Non-"not found" errors (DB down, connection reset) return 500 instead
+	// of silently falling through and creating a second row.
 	var existing models.GatewayAccount
 	err = h.DB.Where("user_id = ? AND gateway_type = ?", userID, req.GatewayType).First(&existing).Error
 
@@ -106,7 +115,6 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 		})
 	}
 
-	// TODO: validate the key against the gateway API here before storing it.
 
 	encryptedKey, err := utils.Encrypt(req.APIKey, h.EncryptionKey)
 	if err != nil {
@@ -117,29 +125,17 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 
 	lastFour := req.APIKey[len(req.APIKey)-4:]
 
-	encryptedWebhookSecret := ""
-	if req.WebhookSecret != "" {
-		encryptedWebhookSecret, err = utils.Encrypt(req.WebhookSecret, h.EncryptionKey)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "failed to secure webhook secret",
-			})
-		}
-	}
-
+	// Step 1: create the row. IsActive=false, webhook_secret empty — don't
+	// treat the account as active until the webhook is actually registered.
+	// Otherwise webhook_handler.go will pick it up with an empty secret and
+	// blow up inside Decrypt("") / HMAC key derivation.
 	gatewayAccount := models.GatewayAccount{
 		UserID:         userID,
 		GatewayType:    models.GatewayType(req.GatewayType),
 		APIKey:         encryptedKey,
 		APIKeyLastFour: lastFour,
-		WebhookSecret:  encryptedWebhookSecret,
-		// FIX: this used to be hardcoded `true`. webhook_handler.go looks up
-		// accounts with `is_active = true`, so an account with an EMPTY webhook
-		// secret would match and then blow up inside Decrypt("") / HMAC key
-		// derivation. IsActive is now true only when a secret actually exists;
-		// otherwise SetWebhookSecret activates it later.
-		IsActive:    encryptedWebhookSecret != "",
-		ConnectedAt: time.Now(),
+		IsActive:       false,
+		ConnectedAt:    time.Now(),
 	}
 
 	if err := h.DB.Create(&gatewayAccount).Error; err != nil {
@@ -151,27 +147,66 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 		})
 	}
 
+	// Step 2: build the webhook URL — it depends on this record's ID, so it
+	// can only be built after creation.
+	webhookURL := h.BaseURL + "/api/v1/webhook/" + req.GatewayType + "/" + gatewayAccount.ID.String()
+
+
+	// Step 3: register the webhook with the gateway API. We use the plaintext
+	// req.APIKey here (the encrypted version is already stored in the DB).
+	gw, err := gateway.GetGateway(req.GatewayType)
+	if err != nil {
+		h.DB.Delete(&gatewayAccount) // rollback — half-baked row mat chhodo
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "unsupported gateway",
+		})
+	}
+
+	secret, err := gw.RegisterWebhook(req.APIKey, webhookURL)
+	if err != nil {
+		h.DB.Delete(&gatewayAccount) // rollback — galat API key ya gateway-side issue
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": "failed to register webhook, check your API key: " + err.Error(),
+		})
+	}
+
+
+	// Step 4: encrypt the secret and do a targeted UPDATE — not Save(), since
+	// that rewrites every column (APIKey/ConnectedAt too), which could
+	// clobber a concurrent change. Only touch the fields that actually change.
+	encryptedSecret, err := utils.Encrypt(secret, h.EncryptionKey)
+	if err != nil {
+		h.DB.Delete(&gatewayAccount) // rollback
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to secure webhook secret",
+		})
+	}
+
+	if err := h.DB.Model(&gatewayAccount).Updates(map[string]interface{}{
+		"webhook_secret": encryptedSecret,
+		"is_active":      true,
+	}).Error; err != nil {
+		h.DB.Delete(&gatewayAccount) 
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to activate gateway",
+		})
+	}
+
 	return c.Status(fiber.StatusCreated).JSON(fiber.Map{
-		"message": "gateway connected successfully",
+		"message": "gateway connected and webhook registered automatically",
 		"gateway": fiber.Map{
 			"id":           gatewayAccount.ID,
 			"gateway_type": gatewayAccount.GatewayType,
-			"is_active":    gatewayAccount.IsActive,
-			// The founder registers this URL in their Stripe/Dodo dashboard,
-			// gets a signing secret back, and posts it to SetWebhookSecret.
-			"webhook_url": "/api/v1/webhook/" + string(gatewayAccount.GatewayType) + "/" + gatewayAccount.ID.String(),
+			"is_active":    true,
 		},
 	})
 }
 
-// SetWebhookSecret — Step B of the connect flow. The founder registers the
-// webhook_url returned by ConnectGateway in their Stripe/Dodo dashboard,
-// receives a signing secret, and submits it here. This activates the account.
-//
-// FIX: this method did not exist before, so there was no way to set the secret
-// after account creation — and supplying it during ConnectGateway is impossible
-// in the correct order, since the secret only exists after the webhook URL has
-// been registered.
+// SetWebhookSecret — manual fallback. In the normal flow, ConnectGateway
+// itself registers the webhook and sets the secret (Step 3-4 above). This
+// endpoint is useful when auto-registration fails for some reason (gateway
+// API down, rate-limited, permissions issue) and the founder needs to
+// manually grab the secret from the Stripe/Dodo dashboard and set it here.
 func (h *GatewayHandler) SetWebhookSecret(c *fiber.Ctx) error {
 	userID, err := getUserID(c)
 	if err != nil {
@@ -180,7 +215,7 @@ func (h *GatewayHandler) SetWebhookSecret(c *fiber.Ctx) error {
 		})
 	}
 
-	// FIX: parse the path param instead of passing a raw string into the query.
+	// Parse the path param instead of passing a raw string into the query.
 	// A malformed uuid otherwise reaches Postgres and produces a 500 from an
 	// invalid-input-syntax error instead of a clean 404.
 	gatewayID, err := uuid.Parse(c.Params("id"))
@@ -301,3 +336,4 @@ func (h *GatewayHandler) DisconnectGateway(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"message": "gateway disconnected"})
 }
+

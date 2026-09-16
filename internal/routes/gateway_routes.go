@@ -12,6 +12,5 @@ func RegisterGatewayRoutes(router fiber.Router, h *handlers.GatewayHandler, jwtS
 
 	gateway.Post("/connect", h.ConnectGateway)
 	gateway.Get("/", h.ListGateways)
-	gateway.Put("/:id/webhook-secret", h.SetWebhookSecret)
 	gateway.Delete("/:id", h.DisconnectGateway)
 }

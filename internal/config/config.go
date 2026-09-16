@@ -1,6 +1,6 @@
 package config
 
-import(
+import (
 	"log"
 	"os"
 
@@ -8,29 +8,24 @@ import(
 )
 
 type Config struct {
-	DatabaseURL				string
-	PORT					string
-	JWTSecret				string
-	FrontendURL				string
+	DatabaseURL string
+	PORT        string
+	JWTSecret   string
+	FrontendURL string
 
-	DodoAPIKey				string
-	DodoWebhookSecret 		string
-	DodoMode				string
+	BaseURL string
 
-	StripeSecretKey			string
-	StripeWebhookSecret 	string
+	ResendAPIKey string
 
-	ResendAPIKey			string
+	GoogleClientID     string
+	GoogleClientSecret string
+	GoogleRedirectURL  string
 
-	GoogleClientID     		string
-	GoogleClientSecret 		string
-	GoogleRedirectURL  		string
+	GithubClientID     string
+	GithubClientSecret string
+	GithubRedirectURL  string
 
-	GithubClientID     		string
-	GithubClientSecret 		string
-	GithubRedirectURL  		string
-
-	EncryptionKey 			string
+	EncryptionKey string
 }
 
 
@@ -41,51 +36,54 @@ func LoadConfig() *Config {
 		log.Println("No .env file found, reading from system env")
 	}
 
-	dodoMode := os.Getenv("DODO_MODE")
-
-	if dodoMode == "" {
-		dodoMode = "test"
-	}
 
 	frontendURL := os.Getenv("FRONTEND_URL")
-
 	if frontendURL == "" {
-		frontendURL = "http://localhost:3000"  // local dev
+		frontendURL = "http://localhost:3000" // local dev
 	}
 
-	port := os.Getenv("PORT")
 
+	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
+	
+	baseURL := os.Getenv("BASE_URL")
+	if baseURL == "" {
+		baseURL = "http://127.0.0.1:8080" // local dev fallback
+	}
+
+	googleRedirectURL := os.Getenv("GOOGLE_REDIRECT_URI")
+	if googleRedirectURL == "" {
+		googleRedirectURL = baseURL + "/api/v1/auth/google/callback"
+	}
+
+	githubRedirectURL := os.Getenv("GITHUB_REDIRECT_URI")
+	if githubRedirectURL == "" {
+		githubRedirectURL = baseURL + "/api/v1/auth/github/callback"
+	}
+
 	cfg := &Config{
 		DatabaseURL: os.Getenv("DATABASE_URL"),
-		PORT: port,
-		JWTSecret: os.Getenv("JWT_SECRET"),
+		PORT:        port,
+		JWTSecret:   os.Getenv("JWT_SECRET"),
 		FrontendURL: frontendURL,
 
-		// DODO
-		DodoAPIKey: 	   os.Getenv("DODO_API_KEY"),
-		DodoWebhookSecret: os.Getenv("DODO_WEBHOOK_SECRET"),
-		DodoMode: 		   dodoMode,
+		BaseURL: baseURL,
 
-		// Stripe
-		StripeSecretKey: os.Getenv("STRIPE_SECRET_KEY"),
-		StripeWebhookSecret: os.Getenv("STRIPE_WEBHOOK_SECRET"),
-
-		//Resend Email
+		// Resend Email
 		ResendAPIKey: os.Getenv("RESEND_API_KEY"),
 
 		// Google auth
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
 		GoogleClientSecret: os.Getenv("GOOGLE_CLIENT_SECRET"),
-		GoogleRedirectURL:  "http://127.0.0.1:8080/api/v1/auth/google/callback",
+		GoogleRedirectURL:  googleRedirectURL,
 
 		// Github auth
 		GithubClientID:     os.Getenv("GITHUB_CLIENT_ID"),
 		GithubClientSecret: os.Getenv("GITHUB_CLIENT_SECRET"),
-		GithubRedirectURL:  "http://127.0.0.1:8080/api/v1/auth/github/callback",
+		GithubRedirectURL:  githubRedirectURL,
 
 		// Encryption
 		EncryptionKey: os.Getenv("ENCRYPTION_KEY"),
@@ -105,4 +103,3 @@ func LoadConfig() *Config {
 
 	return cfg
 }
-
