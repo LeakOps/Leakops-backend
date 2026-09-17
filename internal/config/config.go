@@ -15,7 +15,8 @@ type Config struct {
 
 	BaseURL string
 
-	ResendAPIKey string
+	ResendAPIKey    string
+	ResendFromEmail string
 
 	GoogleClientID     string
 	GoogleClientSecret string
@@ -73,7 +74,8 @@ func LoadConfig() *Config {
 		BaseURL: baseURL,
 
 		// Resend Email
-		ResendAPIKey: os.Getenv("RESEND_API_KEY"),
+		ResendAPIKey:    os.Getenv("RESEND_API_KEY"),
+		ResendFromEmail: os.Getenv("RESEND_FROM_EMAIL"),
 
 		// Google auth
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
