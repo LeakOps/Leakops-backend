@@ -22,7 +22,7 @@ func NewEngine(db *gorm.DB, encryptionKey string, dunningSvc *email.DunningServi
 	return &Engine{DB: db, EncryptionKey: encryptionKey, DunningSvc: dunningSvc}
 }
 
-func (e *Engine) start() {
+func (e *Engine) Start() {
 	ticker := time.NewTicker(1 * time.Minute)
 	defer ticker.Stop()
 	log.Println("Retry engine started")

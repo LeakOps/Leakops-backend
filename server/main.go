@@ -5,7 +5,9 @@ import (
 
 	"Leakops-backend/internal/config"
 	"Leakops-backend/internal/db"
+	"Leakops-backend/internal/email"
 	"Leakops-backend/internal/middlewares"
+	"Leakops-backend/internal/retry"
 	"Leakops-backend/internal/routes"
 
 	"github.com/gofiber/fiber/v2"
@@ -31,6 +33,12 @@ func main() {
 
 	// Register all Routes
 	routes.SetupRoutes(app, database, cfg)
+
+
+	// Starting retry engine in background (Day 1/3/7 retries + dunning emails)
+	dunningSvc := email.NewDunningService(cfg.ResendAPIKey, cfg.ResendFromEmail)
+	retryEngine := retry.NewEngine(database, cfg.EncryptionKey, dunningSvc)
+	go retryEngine.Start()
 
 	log.Println("Leakops backend listening on port :" + cfg.PORT)
 	log.Fatal(app.Listen(":" + cfg.PORT))
