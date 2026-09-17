@@ -17,6 +17,7 @@ func SetupRoutes(app *fiber.App, database *gorm.DB, cfg *config.Config) {
 	oauthHandler := handlers.NewOAuthHandler(database, cfg)
 	gatewayHandler := handlers.NewGatewayHandler(database, cfg.EncryptionKey, cfg.BaseURL)
 	webhookHandler := handlers.NewWebhookHandler(database, cfg.EncryptionKey)
+	dashboardHandler := handlers.NewDashboardHandler(database)
 
 	
 	// Register route groups
@@ -24,5 +25,6 @@ func SetupRoutes(app *fiber.App, database *gorm.DB, cfg *config.Config) {
 	RegisterOAuthRoutes(api, oauthHandler)
 	RegisterGatewayRoutes(api, gatewayHandler, cfg.JWTSecret)
 	RegisterWebhookRoutes(api, webhookHandler)
+	RegisterDashboardRoutes(api, dashboardHandler, cfg.JWTSecret)
 }
 
