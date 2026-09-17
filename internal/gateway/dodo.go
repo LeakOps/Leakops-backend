@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -225,13 +226,19 @@ func (d *DodoGateway) RegisterWebhook(apiKey string, webhookURL string) (string,
 		return "", errors.New("Missing dodo api key")
 	}
 
-	client := dodopayments.NewClient(
+	clientOptions := []option.RequestOption{
 		option.WithBearerToken(apiKey),
-	)
+	}
+	if strings.EqualFold(strings.TrimSpace(os.Getenv("DODO_ENVIRONMENT")), "test") ||
+		strings.EqualFold(strings.TrimSpace(os.Getenv("DODO_ENVIRONMENT")), "test_mode") {
+		clientOptions = append(clientOptions, option.WithEnvironmentTestMode())
+	}
+
+	client := dodopayments.NewClient(clientOptions...)
 
 	// Step-1 Create Webhook endpoint
 	webhookDetails, err := client.Webhooks.New(context.Background(), dodopayments.WebhookNewParams{
-		URL:         dodopayments.F(webhookURL),
+		URL: dodopayments.F(webhookURL),
 		FilterTypes: dodopayments.F([]dodopayments.WebhookEventType{
 			dodopayments.WebhookEventTypePaymentFailed,
 		}),

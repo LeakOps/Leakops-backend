@@ -27,6 +27,8 @@ type Config struct {
 	GithubRedirectURL  string
 
 	EncryptionKey string
+
+	DodoEnvironment    string
 }
 
 
@@ -89,6 +91,9 @@ func LoadConfig() *Config {
 
 		// Encryption
 		EncryptionKey: os.Getenv("ENCRYPTION_KEY"),
+
+		// dodo
+    	DodoEnvironment: os.Getenv("DODO_ENVIRONMENT"),
 	}
 
 	if cfg.DatabaseURL == "" {
