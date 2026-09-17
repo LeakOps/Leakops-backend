@@ -3,6 +3,7 @@ package handlers
 import(
 	"errors"
 	"log"
+	"time"
 	"strings"
 
 	"Leakops-backend/internal/gateway"
@@ -155,6 +156,7 @@ func(h* WebhookHandler) HandleWebhook(c *fiber.Ctx) error {
 			Currency:          parsedEvent.Currency,
 			Status:            string(models.StatusPending),
 			FailureReason:     parsedEvent.FailureReason,
+			NextTryAt:     	   ptrTime(time.Now().Add(24 * time.Hour)),
 		}).Error
 	})
 
@@ -168,4 +170,8 @@ func(h* WebhookHandler) HandleWebhook(c *fiber.Ctx) error {
 	}
 
 	return c.SendStatus(fiber.StatusOK)
+}
+
+func ptrTime(t time.Time) *time.Time {
+	return &t
 }
