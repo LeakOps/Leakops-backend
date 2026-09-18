@@ -26,6 +26,7 @@ func ConnectDB(dsn string) *gorm.DB {
 		&models.GatewayAccount{},
 		&models.FailedPayment{},
 		&models.RetryLog{},
+		&models.Subscription{},
 	)
 
 	if err != nil {

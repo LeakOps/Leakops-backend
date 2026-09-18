@@ -3,6 +3,7 @@ package config
 import (
 	"log"
 	"os"
+	"strings"
 
 	"github.com/joho/godotenv"
 )
@@ -26,9 +27,16 @@ type Config struct {
 	GithubClientSecret string
 	GithubRedirectURL  string
 
-	EncryptionKey string
+	EncryptionKey 	   string
 
 	DodoEnvironment    string
+
+	LeakopsDodoAPIKey     string
+	LeakopsDodoTestMode   bool
+
+	DodoProductStarter 	  string
+	DodoProductGrowth  	  string
+	DodoProductScale      string
 }
 
 
@@ -92,8 +100,16 @@ func LoadConfig() *Config {
 		// Encryption
 		EncryptionKey: os.Getenv("ENCRYPTION_KEY"),
 
-		// dodo
+		// dodo founder
     	DodoEnvironment: os.Getenv("DODO_ENVIRONMENT"),
+
+		// Dodo billing
+		LeakopsDodoAPIKey:   os.Getenv("LEAKOPS_DODO_API_KEY"),
+		LeakopsDodoTestMode: strings.EqualFold(os.Getenv("LEAKOPS_DODO_ENVIRONMENT"), "test"),
+
+		DodoProductStarter: os.Getenv("DODO_PRODUCT_STARTER"),
+		DodoProductGrowth:  os.Getenv("DODO_PRODUCT_GROWTH"),
+		DodoProductScale:   os.Getenv("DODO_PRODUCT_SCALE"),
 	}
 
 	if cfg.DatabaseURL == "" {
