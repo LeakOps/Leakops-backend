@@ -1,6 +1,6 @@
 package handlers
 
-import(
+import (
 	"encoding/json"
 	"log"
 	"time"
@@ -14,8 +14,8 @@ import(
 )
 
 type BillingWebhookHandler struct {
-	DB 				*gorm.DB
-	WebhookSecret 	string
+	DB            *gorm.DB
+	WebhookSecret string
 }
 
 func NewBillingWebhookHandler(db *gorm.DB, webhookSecret string) *BillingWebhookHandler {
@@ -26,24 +26,23 @@ func NewBillingWebhookHandler(db *gorm.DB, webhookSecret string) *BillingWebhook
 // from Dodo (payment/subscription lifecycle),not to be confused with the
 // founder-facing payment.failed events in gateway/dodo.go.
 type dodoBillingEvent struct {
-	Type	string  `json:"type"`
+	Type string `json:"type"`
 	Data struct {
-		SubscriptionID 		string `json:"subscription_id"`
-		CustomerID			string `json:"customer_id"`
-		Email				string `json:"email"`
-		ProductID			string `json:"product_id"`
-		Status 				string `json:"status"`
-		NextBillingDate 	string `json:"next_billing_date"`
+		SubscriptionID  string `json:"subscription_id"`
+		CustomerID      string `json:"customer_id"`
+		Email           string `json:"email"`
+		ProductID       string `json:"product_id"`
+		Status          string `json:"status"`
+		NextBillingDate string `json:"next_billing_date"`
 	} `json:"data"`
 }
-
 
 func (h *BillingWebhookHandler) HandleDodoBillingWebhook(c *fiber.Ctx) error {
 	webhookID := c.Get("webhook-id")
 	webhookTimestamp := c.Get("webhook-timestamp")
 	webhookSignature := c.Get("webhook-signature")
 
-	if err := utils.VerifyStandardWebhook(c.Body(), webhookID, webhookSignature, webhookTimestamp, h.WebhookSecret); err != nil {
+	if err := utils.VerifyStandardWebhook(c.Body(), webhookID, webhookTimestamp, webhookSignature, h.WebhookSecret); err != nil {
 		log.Printf("billing webhook: verification failed: %v", err)
 		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
 			"error": "webhook verification failed",
@@ -59,6 +58,75 @@ func (h *BillingWebhookHandler) HandleDodoBillingWebhook(c *fiber.Ctx) error {
 	}
 
 	switch event.Type {
-
+	case "subscription.active", "payment_succededed":
+		h.upsertSubscription(event, models.SubStatusActive)
+	case "subscription.cancelled", "subscription.expired":
+		h.upsertSubscription(event, models.SubStatusCancelled)
+	case "payment.failed", "subscription.past_due":
+		h.upsertSubscription(event, models.SubStatusPastDue)
+	default:
+		// unhandled event type,
+		log.Printf("billing webhook: unhandled event type %s", event.Type)
 	}
+
+	return c.SendStatus(fiber.StatusOK)
+}
+
+func (h *BillingWebhookHandler) upsertSubscription(event dodoBillingEvent, status models.SubscriptionStatus) {
+	if event.Data.Email == "" {
+		log.Printf("billing webhook: event %s missing customer email, cannot map to user", event.Type)
+		return
+	}
+
+	var user models.User
+	if err := h.DB.Where("email = ?", event.Data.Email).First(&user).Error; err != nil {
+		log.Printf("billing webhook: no user found for email %s", event.Data.Email)
+		return
+	}
+
+	plan := planFromProductID(event.Data.ProductID)
+
+	var sub models.Subscription
+	result := h.DB.Where("user_id = ?", user.ID).First(&sub)
+
+	if result.Error != nil {
+		sub = models.Subscription{
+			ID:                 uuid.New(),
+			UserID:             user.ID,
+			Plan:               plan,
+			Status:             status,
+			DodoSubscriptionID: event.Data.SubscriptionID,
+			DodoCustomerID:     event.Data.CustomerID,
+		}
+
+		if err := h.DB.Create(&sub).Error; err != nil {
+			log.Printf("billing webhook: failed to create subscription: %v", err)
+		}
+		return
+	}
+
+	updates := map[string]interface{}{
+		"status":               status,
+		"plan":                 plan,
+		"dodo_subscription_id": event.Data.SubscriptionID,
+		"dodo_customer_id":     event.Data.CustomerID,
+	}
+
+	if event.Data.NextBillingDate != "" {
+		if t, err := time.Parse(time.RFC3339, event.Data.NextBillingDate); err == nil {
+			updates["current_period_end"] = t
+		}
+	}
+
+	h.DB.Model(&sub).Updates(updates)
+}
+
+// planFromProductID maps a Dodo product ID back to our PlanTier enum.
+// This relies on config-level product IDs; for now it's a simple TODO map
+// that should be wired from config rather than hardcoded once product IDs
+// are finalized
+
+func planFromProductID(productID string) models.PlanTier {
+	// TODO: replace with config-driven mapping (cfg.DodoProductStarter, etc.)
+	return models.PlanStarter
 }
