@@ -58,14 +58,15 @@ func (h *BillingWebhookHandler) HandleDodoBillingWebhook(c *fiber.Ctx) error {
 	}
 
 	switch event.Type {
-	case "subscription.active", "payment_succededed":
+	case "subscription.active", "subscription.renewed", "payment.succeeded":
 		h.upsertSubscription(event, models.SubStatusActive)
 	case "subscription.cancelled", "subscription.expired":
 		h.upsertSubscription(event, models.SubStatusCancelled)
-	case "payment.failed", "subscription.past_due":
+	case "payment.failed", "subscription.failed", "subscription.past_due", "subscription.on_hold":
 		h.upsertSubscription(event, models.SubStatusPastDue)
+	case "subscription.paused":
+		h.upsertSubscription(event, models.SubStatusCancelled)
 	default:
-		// unhandled event type,
 		log.Printf("billing webhook: unhandled event type %s", event.Type)
 	}
 
