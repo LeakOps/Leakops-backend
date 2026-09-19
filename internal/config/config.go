@@ -38,6 +38,13 @@ type Config struct {
 	DodoProductStarter 	  string
 	DodoProductGrowth  	  string
 	DodoProductScale      string
+
+	SupabaseS3Endpoint	  string
+	SupabaseS3Region	  string
+	SupabaseS3AccessKeyID string
+	SupabaseS3SecretKey	  string
+	SupabaseBucketName	  string
+	SupabasePublicURL     string
 }
 
 
@@ -109,9 +116,18 @@ func LoadConfig() *Config {
 		LeakopsDodoWebhookSecret: os.Getenv("LEAKOPS_DODO_WEBHOOK_SECRET"),
 		LeakopsDodoTestMode: strings.EqualFold(os.Getenv("LEAKOPS_DODO_ENVIRONMENT"), "test"),
 
+		// Plans
 		DodoProductStarter: os.Getenv("DODO_PRODUCT_STARTER"),
 		DodoProductGrowth:  os.Getenv("DODO_PRODUCT_GROWTH"),
 		DodoProductScale:   os.Getenv("DODO_PRODUCT_SCALE"),
+
+		// Supabase Storage
+		SupabaseS3Endpoint: 	os.Getenv("SUPABASE_S3_ENDPOINT"),
+		SupabaseS3Region:   	os.Getenv("SUPABASE_S3_REGION"),
+		SupabaseS3AccessKeyID:	os.Getenv("SUPABASE_S3_ACCESS_KEY_ID"),
+		SupabaseS3SecretKey: 	os.Getenv("SUPABASE_S3_SECRET_ACCESS_KEY"),
+		SupabaseBucketName:		os.Getenv("SUPABASE_BUCKET_NAME"),
+		SupabasePublicURL: 		os.Getenv("SUPABASE_PUBLIC_UR"),
 	}
 
 	if cfg.DatabaseURL == "" {
