@@ -121,7 +121,7 @@ func LoadConfig() *Config {
 		DodoProductGrowth:  os.Getenv("DODO_PRODUCT_GROWTH"),
 		DodoProductScale:   os.Getenv("DODO_PRODUCT_SCALE"),
 
-		// Supabase Storage
+		// Storage
 		SupabaseS3Endpoint: 	os.Getenv("SUPABASE_S3_ENDPOINT"),
 		SupabaseS3Region:   	os.Getenv("SUPABASE_S3_REGION"),
 		SupabaseS3AccessKeyID:	os.Getenv("SUPABASE_S3_ACCESS_KEY_ID"),
