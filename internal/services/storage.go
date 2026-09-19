@@ -19,7 +19,7 @@ type StorageService struct {
 }
 
 
-func NewsStorageService(endpoint, region, accessKeyID, secretKey, bucketName, publicURL string) *StorageService {
+func NewStorageService(endpoint, region, accessKeyID, secretKey, bucketName, publicURL string) *StorageService {
 	client := s3.New(s3.Options{
 		BaseEndpoint:  	aws.String(endpoint),
 		Region: 		region,
