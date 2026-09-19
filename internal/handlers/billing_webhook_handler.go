@@ -3,6 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"log"
+	"strings"
 	"time"
 
 	"Leakops-backend/internal/models"
@@ -14,12 +15,21 @@ import (
 )
 
 type BillingWebhookHandler struct {
-	DB            *gorm.DB
-	WebhookSecret string
+	DB             *gorm.DB
+	WebhookSecret  string
+	ProductStarter string
+	ProductGrowth  string
+	ProductScale   string
 }
 
-func NewBillingWebhookHandler(db *gorm.DB, webhookSecret string) *BillingWebhookHandler {
-	return &BillingWebhookHandler{DB: db, WebhookSecret: webhookSecret}
+func NewBillingWebhookHandler(db *gorm.DB, webhookSecret, productStarter, productGrowth, productScale string) *BillingWebhookHandler {
+	return &BillingWebhookHandler{
+		DB:             db,
+		WebhookSecret:  webhookSecret,
+		ProductStarter: productStarter,
+		ProductGrowth:  productGrowth,
+		ProductScale:   productScale,
+	}
 }
 
 // dodoBillingEvent mirrors the shape of LeakOps's own subscription events
@@ -85,7 +95,7 @@ func (h *BillingWebhookHandler) upsertSubscription(event dodoBillingEvent, statu
 		return
 	}
 
-	plan := planFromProductID(event.Data.ProductID)
+	plan := h.planFromProductID(event.Data.ProductID)
 
 	var sub models.Subscription
 	result := h.DB.Where("user_id = ?", user.ID).First(&sub)
@@ -123,11 +133,20 @@ func (h *BillingWebhookHandler) upsertSubscription(event dodoBillingEvent, statu
 }
 
 // planFromProductID maps a Dodo product ID back to our PlanTier enum.
-// This relies on config-level product IDs; for now it's a simple TODO map
-// that should be wired from config rather than hardcoded once product IDs
-// are finalized
+func (h *BillingWebhookHandler) planFromProductID(productID string) models.PlanTier {
+	productID = strings.TrimSpace(productID)
+	if productID == "" {
+		return models.PlanFree
+	}
 
-func planFromProductID(productID string) models.PlanTier {
-	// TODO: replace with config-driven mapping (cfg.DodoProductStarter, etc.)
-	return models.PlanStarter
+	switch productID {
+	case h.ProductStarter:
+		return models.PlanStarter
+	case h.ProductGrowth:
+		return models.PlanGrowth
+	case h.ProductScale:
+		return models.PlanScale
+	default:
+		return models.PlanFree
+	}
 }

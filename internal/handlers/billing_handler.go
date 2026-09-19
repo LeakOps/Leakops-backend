@@ -1,6 +1,8 @@
 package handlers
 
 import(
+	"log"
+
 	"Leakops-backend/internal/models"
 
 	"github.com/gofiber/fiber/v2"
@@ -66,6 +68,7 @@ func (h *BillingHandler) CreateCheckout(c *fiber.Ctx) error {
 
 	checkoutURL, err := h.PaymentSvc.CreateCheckoutSession(user.Email, productID, h.FrontendURL+"/billing/success")
 	if err != nil {
+		log.Printf("billing: checkout session creation failed: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to create checkout session",
 		})

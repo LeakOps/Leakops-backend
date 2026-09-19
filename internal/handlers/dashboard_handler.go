@@ -1,6 +1,9 @@
 package handlers
 
 import (
+	"encoding/csv"
+	"fmt"
+
 	"Leakops-backend/internal/models"
 
 	"github.com/gofiber/fiber/v2"
@@ -100,4 +103,43 @@ func (h *DashboardHandler) GetPayments(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{"payments": response})
+}
+
+
+func (h *DashboardHandler) ExportPaymentsCSV(c *fiber.Ctx) error {
+	userID, err := uuid.Parse(c.Locals("userID").(string))
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "invalid user",
+		})
+	}
+
+	var payments []models.FailedPayment
+	h.DB.Joins("JOIN gateway_accounts ON gateway_accounts.id = failed_payments.gateway_account_id").
+	Where("gateway_accounts.user_id = ?", userID).
+	Preload("Customer").
+	Order("failed_payments.created_at DESC").
+	Find(&payments)
+
+	c.Set("Content-Type", "text/csv")
+	c.Set("Content-Disposition", "attachment; filename=leakops_payments.csv")
+
+	writer := csv.NewWriter(c.Response().BodyWriter())
+	defer writer.Flush()
+
+	writer.Write([]string{"Customer Name", "Customer Email", "Amount", "Currency", "Status", "Retry Count", "Created At"})
+
+	for _, p := range payments {
+		writer.Write([]string{
+			p.Customer.Name,
+			p.Customer.Email,
+			fmt.Sprintf("%.2f", float64(p.AmountCents)/100),
+			p.Currency,
+			p.Status,
+			fmt.Sprintf("%d", p.RetryCount),
+			p.CreatedAt.Format("2006-01-02 15:04"),
+		})
+	}
+
+	return nil
 }

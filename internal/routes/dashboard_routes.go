@@ -13,4 +13,5 @@ func RegisterDashboardRoutes(router fiber.Router, h *handlers.DashboardHandler, 
 
 	dashboard.Get("/summary", h.GetSummary)
 	dashboard.Get("/payments", h.GetPayments)
+	dashboard.Get("/export", h.ExportPaymentsCSV)
 }

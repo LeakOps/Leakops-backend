@@ -21,7 +21,7 @@ func SetupRoutes(app *fiber.App, database *gorm.DB, cfg *config.Config) {
 
 	paymentSvc := services.NewPaymentService(cfg.LeakopsDodoAPIKey, cfg.LeakopsDodoTestMode)
 	billingHandler := handlers.NewBillingHandler(database, paymentSvc, cfg.FrontendURL, cfg.DodoProductStarter, cfg.DodoProductGrowth, cfg.DodoProductScale)
-	BillingWebhookHandler := handlers.NewBillingWebhookHandler(database, cfg.LeakopsDodoWebhookSecret)
+	BillingWebhookHandler := handlers.NewBillingWebhookHandler(database, cfg.LeakopsDodoWebhookSecret, cfg.DodoProductStarter, cfg.DodoProductGrowth, cfg.DodoProductScale)
 
 	storageSvc := services.NewStorageService(
 		cfg.SupabaseS3Endpoint, cfg.SupabaseS3Region,
@@ -39,4 +39,3 @@ func SetupRoutes(app *fiber.App, database *gorm.DB, cfg *config.Config) {
 	RegisterBillingRoutes(api, billingHandler, BillingWebhookHandler, cfg.JWTSecret)
 	RegisterProfileRoutes(api, profileHandler, cfg.JWTSecret)
 }
-
