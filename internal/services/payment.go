@@ -14,13 +14,13 @@ type PaymentService struct {
 	client *dodopayments.Client
 }
 
-func NewPaymentService(apiKey string, testMode bool) *PaymentService {
+func NewPaymentService(apiKey string, liveMode bool) *PaymentService {
 	opts := []option.RequestOption{option.WithBearerToken(apiKey)}
-	if testMode {
+	if !liveMode {
 		opts = append(opts, option.WithEnvironmentTestMode())
 	}
 	return &PaymentService{client: dodopayments.NewClient(opts...)}
-}
+} 
 
 // CreateCheckoutSession creates a Dodo payment link for a founder to
 // subscribe to a given product/plan. Returns the checkout URL to redirect
@@ -39,7 +39,7 @@ func (p *PaymentService) CreateCheckoutSession(customerEmail string, productID s
 			ProductCart: dodopayments.F([]dodopayments.ProductItemReqParam{
 				{
 					ProductID: dodopayments.F(productID),
-					Quantity: dodopayments.F(int64(1)),
+					Quantity:  dodopayments.F(int64(1)),
 				},
 			}),
 			ReturnURL: dodopayments.F(successURL),
