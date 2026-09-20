@@ -1,26 +1,25 @@
 package handlers
 
-import(
+import (
 	"errors"
 	"log"
-	"time"
 	"strings"
+	"time"
 
 	"Leakops-backend/internal/gateway"
 	"Leakops-backend/internal/models"
+	"Leakops-backend/internal/services"
 	"Leakops-backend/internal/utils"
- 
+
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
-
 type WebhookHandler struct {
-	DB 				*gorm.DB
-	EncryptionKey	string
+	DB            *gorm.DB
+	EncryptionKey string
 }
-
 
 func NewWebhookHandler(db *gorm.DB, encryptionKey string) *WebhookHandler {
 	return &WebhookHandler{DB: db, EncryptionKey: encryptionKey}
@@ -32,7 +31,7 @@ func NewWebhookHandler(db *gorm.DB, encryptionKey string) *WebhookHandler {
 //
 // Fiber param names are case-sensitive — a mismatch here silently yields empty
 // strings rather than an error.
-func(h* WebhookHandler) HandleWebhook(c *fiber.Ctx) error {
+func (h *WebhookHandler) HandleWebhook(c *fiber.Ctx) error {
 	gatewayTypeStr := strings.ToLower(c.Params("gatewayType")) // "stripe" | "dodo"
 	accountIDStr := c.Params("accountID")
 
@@ -85,9 +84,9 @@ func(h* WebhookHandler) HandleWebhook(c *fiber.Ctx) error {
 
 	// Stripe needs one header; Dodo needs the three Standard Webhooks headers.
 	// A map keeps the interface uniform — each gateway picks what it needs.
-	headers := map[string]string {
-		"Stripe-Signature": c.Get("Stripe-Signature"),
-		"webhook-id": c.Get("webhook-id"),
+	headers := map[string]string{
+		"Stripe-Signature":  c.Get("Stripe-Signature"),
+		"webhook-id":        c.Get("webhook-id"),
 		"webhook-signature": c.Get("webhook-signature"),
 		"webhook-timestamp": c.Get("webhook-timestamp"),
 	}
@@ -115,6 +114,10 @@ func(h* WebhookHandler) HandleWebhook(c *fiber.Ctx) error {
 	// failed Create left customer.ID as the zero uuid and the FailedPayment row
 	// was written against it silently.
 	err = h.DB.Transaction(func(tx *gorm.DB) error {
+		if err := services.CheckMonthlyRevenueLimit(tx, gatewayAccount.UserID, parsedEvent.AmountCents); err != nil {
+			return err
+		}
+
 		var customer models.Customer
 
 		custResult := tx.Where(
@@ -131,8 +134,8 @@ func(h* WebhookHandler) HandleWebhook(c *fiber.Ctx) error {
 			}
 
 			customer = models.Customer{
-				UserID: 			gatewayAccount.UserID,
-				GatewayAccountID: 	accountID,
+				UserID:             gatewayAccount.UserID,
+				GatewayAccountID:   accountID,
 				ExternalCustomerID: parsedEvent.ExternalCustomerID,
 				Email:              parsedEvent.CustomerEmail,
 				Name:               parsedEvent.CustomerName,
@@ -145,9 +148,9 @@ func(h* WebhookHandler) HandleWebhook(c *fiber.Ctx) error {
 		// FirstOrCreate keyed on (gateway_account_id, external_invoice_id) makes
 		// duplicate webhook deliveries idempotent.
 		var payment models.FailedPayment
-		return tx.Where(models.FailedPayment {
-			GatewayAccountID:		accountID,
-			ExternalInvoiceID: 		parsedEvent.ExternalInvoiceID,
+		return tx.Where(models.FailedPayment{
+			GatewayAccountID:  accountID,
+			ExternalInvoiceID: parsedEvent.ExternalInvoiceID,
 		}).FirstOrCreate(&payment, models.FailedPayment{
 			GatewayAccountID:  accountID,
 			ExternalInvoiceID: parsedEvent.ExternalInvoiceID,
@@ -156,11 +159,20 @@ func(h* WebhookHandler) HandleWebhook(c *fiber.Ctx) error {
 			Currency:          parsedEvent.Currency,
 			Status:            string(models.StatusPending),
 			FailureReason:     parsedEvent.FailureReason,
-			NextTryAt:     	   ptrTime(time.Now().Add(24 * time.Hour)),
+			NextTryAt:         ptrTime(time.Now().Add(24 * time.Hour)),
 		}).Error
 	})
 
 	if err != nil {
+		var limitErr *services.RevenueLimitError
+		if errors.As(err, &limitErr) {
+			log.Printf("webhook: monthly plan limit reached account=%s plan=%s used_cents=%d limit_cents=%d", accountID, limitErr.Plan, limitErr.UsedCents, limitErr.LimitCents)
+			return c.Status(fiber.StatusOK).JSON(fiber.Map{
+				"accepted": false,
+				"error":    "monthly_revenue_limit_reached",
+				"message":  "monthly revenue limit reached for the current plan",
+			})
+		}
 		log.Printf("webhook: persist failed account=%s invoice=%s: %v", accountID, parsedEvent.ExternalInvoiceID, err)
 		// 500 is deliberate here: the signature was valid and this is our fault,
 		// so we want the gateway to retry the delivery.
