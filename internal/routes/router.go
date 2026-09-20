@@ -2,6 +2,7 @@ package routes
 
 import (
 	"Leakops-backend/internal/config"
+	"Leakops-backend/internal/email"
 	"Leakops-backend/internal/handlers"
 	"Leakops-backend/internal/services"
 
@@ -29,6 +30,8 @@ func SetupRoutes(app *fiber.App, database *gorm.DB, cfg *config.Config) {
 		cfg.SupabaseBucketName, cfg.SupabasePublicURL,
 	)
 	profileHandler := handlers.NewProfileHandler(database, storageSvc)
+	dunningSvc := email.NewDunningService(cfg.ResendAPIKey, cfg.ResendFromEmail, cfg.FeedbackToEmail)
+	feedbackHandler := handlers.NewFeedbackHandler(dunningSvc)
 
 	// Register route groups
 	RegisterAuthRoutes(api, authHandler)
@@ -38,4 +41,5 @@ func SetupRoutes(app *fiber.App, database *gorm.DB, cfg *config.Config) {
 	RegisterDashboardRoutes(api, dashboardHandler, cfg.JWTSecret)
 	RegisterBillingRoutes(api, billingHandler, BillingWebhookHandler, cfg.JWTSecret)
 	RegisterProfileRoutes(api, profileHandler, cfg.JWTSecret)
+	RegisterFeedbackRoutes(api, feedbackHandler)
 }
