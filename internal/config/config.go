@@ -18,6 +18,7 @@ type Config struct {
 
 	ResendAPIKey    string
 	ResendFromEmail string
+	FeedbackToEmail string
 
 	GoogleClientID     string
 	GoogleClientSecret string
@@ -27,26 +28,25 @@ type Config struct {
 	GithubClientSecret string
 	GithubRedirectURL  string
 
-	EncryptionKey 	   string
+	EncryptionKey string
 
-	DodoEnvironment    string
+	DodoEnvironment string
 
-	LeakopsDodoAPIKey     	 string
+	LeakopsDodoAPIKey        string
 	LeakopsDodoWebhookSecret string
-	LeakopsDodoLiveMode   bool
+	LeakopsDodoLiveMode      bool
 
-	DodoProductStarter 	  string
-	DodoProductGrowth  	  string
-	DodoProductScale      string
+	DodoProductStarter string
+	DodoProductGrowth  string
+	DodoProductScale   string
 
-	SupabaseS3Endpoint	  string
-	SupabaseS3Region	  string
+	SupabaseS3Endpoint    string
+	SupabaseS3Region      string
 	SupabaseS3AccessKeyID string
-	SupabaseS3SecretKey	  string
-	SupabaseBucketName	  string
+	SupabaseS3SecretKey   string
+	SupabaseBucketName    string
 	SupabasePublicURL     string
 }
-
 
 func LoadConfig() *Config {
 	err := godotenv.Load()
@@ -55,19 +55,19 @@ func LoadConfig() *Config {
 		log.Println("No .env file found, reading from system env")
 	}
 
-
+	
 	frontendURL := os.Getenv("FRONTEND_URL")
 	if frontendURL == "" {
 		frontendURL = "http://localhost:3000" // local dev
 	}
 
+	feedbackToEmail := os.Getenv("FEEDBACK_TO_EMAIL")
 
 	port := os.Getenv("PORT")
 	if port == "" {
 		port = "8080"
 	}
 
-	
 	baseURL := os.Getenv("BASE_URL")
 	if baseURL == "" {
 		baseURL = "http://127.0.0.1:8080" // local dev fallback
@@ -94,6 +94,7 @@ func LoadConfig() *Config {
 		// Resend Email
 		ResendAPIKey:    os.Getenv("RESEND_API_KEY"),
 		ResendFromEmail: os.Getenv("RESEND_FROM_EMAIL"),
+		FeedbackToEmail: feedbackToEmail,
 
 		// Google auth
 		GoogleClientID:     os.Getenv("GOOGLE_CLIENT_ID"),
@@ -109,12 +110,12 @@ func LoadConfig() *Config {
 		EncryptionKey: os.Getenv("ENCRYPTION_KEY"),
 
 		// dodo founder
-    	DodoEnvironment: os.Getenv("DODO_ENVIRONMENT"),
+		DodoEnvironment: os.Getenv("DODO_ENVIRONMENT"),
 
 		// Dodo billing
-		LeakopsDodoAPIKey:   os.Getenv("LEAKOPS_DODO_API_KEY"),
+		LeakopsDodoAPIKey:        os.Getenv("LEAKOPS_DODO_API_KEY"),
 		LeakopsDodoWebhookSecret: os.Getenv("LEAKOPS_DODO_WEBHOOK_SECRET"),
-		LeakopsDodoLiveMode: strings.EqualFold(os.Getenv("LEAKOPS_DODO_ENVIRONMENT"), "live"),
+		LeakopsDodoLiveMode:      strings.EqualFold(os.Getenv("LEAKOPS_DODO_ENVIRONMENT"), "live"),
 
 		// Plans
 		DodoProductStarter: os.Getenv("DODO_PRODUCT_STARTER"),
@@ -122,12 +123,12 @@ func LoadConfig() *Config {
 		DodoProductScale:   os.Getenv("DODO_PRODUCT_SCALE"),
 
 		// Storage
-		SupabaseS3Endpoint: 	os.Getenv("SUPABASE_S3_ENDPOINT"),
-		SupabaseS3Region:   	os.Getenv("SUPABASE_S3_REGION"),
-		SupabaseS3AccessKeyID:	os.Getenv("SUPABASE_S3_ACCESS_KEY_ID"),
-		SupabaseS3SecretKey: 	os.Getenv("SUPABASE_S3_SECRET_ACCESS_KEY"),
-		SupabaseBucketName:		os.Getenv("SUPABASE_BUCKET_NAME"),
-		SupabasePublicURL: 		os.Getenv("SUPABASE_PUBLIC_UR"),
+		SupabaseS3Endpoint:    os.Getenv("SUPABASE_S3_ENDPOINT"),
+		SupabaseS3Region:      os.Getenv("SUPABASE_S3_REGION"),
+		SupabaseS3AccessKeyID: os.Getenv("SUPABASE_S3_ACCESS_KEY_ID"),
+		SupabaseS3SecretKey:   os.Getenv("SUPABASE_S3_SECRET_ACCESS_KEY"),
+		SupabaseBucketName:    os.Getenv("SUPABASE_BUCKET_NAME"),
+		SupabasePublicURL:     os.Getenv("SUPABASE_PUBLIC_UR"),
 	}
 
 	if cfg.DatabaseURL == "" {
@@ -136,6 +137,10 @@ func LoadConfig() *Config {
 
 	if cfg.JWTSecret == "" {
 		log.Fatal("JWT_SECRET is not set in .env")
+	}
+
+	if cfg.FeedbackToEmail == "" {
+		log.Fatal("FEEDBACK_TO_EMAIL is not set in .env")
 	}
 
 	if len(cfg.EncryptionKey) != 32 {
