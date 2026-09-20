@@ -22,6 +22,39 @@ func NewProfileHandler(db *gorm.DB, storage *services.StorageService) *ProfileHa
 	return &ProfileHandler{DB: db, Storage: storage}
 }
 
+func (h *ProfileHandler) GetProfile(c *fiber.Ctx) error {
+	userIDStr, ok := c.Locals("userID").(string)
+	if !ok || userIDStr == "" {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "unauthorized",
+		})
+	}
+	userID, err := uuid.Parse(userIDStr)
+	if err != nil {
+		return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{
+			"error": "invalid user",
+		})
+	}
+
+	var user models.User
+	if err := h.DB.First(&user, "id = ?", userID).Error; err != nil {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"error": "user not found",
+		})
+	}
+
+	return c.JSON(fiber.Map{
+		"user": fiber.Map{
+			"id":                  user.ID,
+			"name":                user.Name,
+			"email":               user.Email,
+			"provider":            user.Provider,
+			"profile_picture_url": user.ProfilePictureURL,
+			"created_at":          user.CreatedAt,
+		},
+	})
+}
+
 func (h *ProfileHandler) UploadProfilePicture(c *fiber.Ctx) error {
 	userIDStr := c.Locals("userID").(string)
 	userID, err := uuid.Parse(userIDStr)
