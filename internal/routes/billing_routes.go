@@ -13,4 +13,5 @@ func RegisterBillingRoutes(router fiber.Router, h *handlers.BillingHandler, wh *
 	billing := router.Group("/billing", middlewares.AuthRequired(jwtSecret))
 	billing.Post("/checkout", h.CreateCheckout)
 	billing.Get("/subscription", h.GetSubscription)
+	billing.Post("/contact-sales", h.ContactSalesForEnterprise)
 }
