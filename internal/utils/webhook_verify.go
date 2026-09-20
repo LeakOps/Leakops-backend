@@ -34,7 +34,7 @@ func VerifyStandardWebhook(payload []byte, webhookID, webhookTimestamp, webhookS
 	signedContent := webhookID + "." + webhookTimestamp + "." + string(payload)
 
 	trimmedSecret := strings.TrimPrefix(secret, "whsec_")
-	secretBytes, err := base64.StdEncoding.DecodeString(trimmedSecret)
+	secretBytes, err := decodeBase64(trimmedSecret)
 	if err != nil {
 		return errors.New("invalid webhook secret")
 	}
@@ -51,7 +51,7 @@ func VerifyStandardWebhook(payload []byte, webhookID, webhookTimestamp, webhookS
 		if len(kv) != 2 || kv[0] != "v1" {
 			continue
 		}
-		sigBytes, err := base64.StdEncoding.DecodeString(kv[1])
+		sigBytes, err := decodeBase64(kv[1])
 		if err != nil {
 			continue
 		}
@@ -67,3 +67,18 @@ func VerifyStandardWebhook(payload []byte, webhookID, webhookTimestamp, webhookS
 	return nil
 }
 
+func decodeBase64(value string) ([]byte, error) {
+	decoders := []*base64.Encoding{
+		base64.StdEncoding,
+		base64.RawStdEncoding,
+		base64.URLEncoding,
+		base64.RawURLEncoding,
+	}
+	for _, decoder := range decoders {
+		decoded, err := decoder.DecodeString(value)
+		if err == nil {
+			return decoded, nil
+		}
+	}
+	return nil, errors.New("invalid base64 value")
+}

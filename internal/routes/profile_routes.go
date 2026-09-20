@@ -10,5 +10,6 @@ import(
 
 func RegisterProfileRoutes(router fiber.Router, h *handlers.ProfileHandler, jwtSecret string) {
 	profile := router.Group("/profile", middlewares.AuthRequired(jwtSecret))
+	profile.Get("/me", h.GetProfile)
 	profile.Post("/picture", h.UploadProfilePicture)
 }
