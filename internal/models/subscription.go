@@ -10,10 +10,11 @@ import (
 type PlanTier string
 
 const (
-	PlanFree    PlanTier = "free"
-	PlanStarter PlanTier = "starter"
-	PlanGrowth  PlanTier = "growth"
-	PlanScale   PlanTier = "scale"
+	PlanFree       PlanTier = "free"
+	PlanStarter    PlanTier = "starter"
+	PlanGrowth     PlanTier = "growth"
+	PlanScale      PlanTier = "scale"
+	PlanEnterprise PlanTier = "enterprise"
 )
 
 type SubscriptionStatus string
