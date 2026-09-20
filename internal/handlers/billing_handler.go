@@ -1,7 +1,9 @@
 package handlers
 
-import(
+import (
 	"log"
+	"net/url"
+	"strings"
 
 	"Leakops-backend/internal/models"
 
@@ -15,28 +17,26 @@ type paymentService interface {
 }
 
 type BillingHandler struct {
-	DB 					*gorm.DB
-	PaymentSvc			paymentService
-	FrontendURL    		string
-	ProductStarter		string
-	ProductGrowth		string
-	ProductScale		string
+	DB             *gorm.DB
+	PaymentSvc     paymentService
+	FrontendURL    string
+	ProductStarter string
+	ProductGrowth  string
+	ProductScale   string
 }
 
-
-func NewBillingHandler (db *gorm.DB, PaymentSvc paymentService, frontendURL, starter, growth, scale string) *BillingHandler {
-	return &BillingHandler {
+func NewBillingHandler(db *gorm.DB, PaymentSvc paymentService, frontendURL, starter, growth, scale string) *BillingHandler {
+	return &BillingHandler{
 		DB: db, PaymentSvc: PaymentSvc, FrontendURL: frontendURL, ProductStarter: starter, ProductGrowth: growth, ProductScale: scale,
 	}
 }
-
 
 func (h *BillingHandler) CreateCheckout(c *fiber.Ctx) error {
 	userIDStr := c.Locals("userID").(string)
 	userID, _ := uuid.Parse(userIDStr)
 
 	var req struct {
-		Plan string `json:"plan"`  // "starter" | "growth" | "scale"
+		Plan string `json:"plan"` // "starter" | "growth" | "scale"
 	}
 
 	if err := c.BodyParser(&req); err != nil {
@@ -70,7 +70,19 @@ func (h *BillingHandler) CreateCheckout(c *fiber.Ctx) error {
 	if err != nil {
 		log.Printf("billing: checkout session creation failed: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to create checkout session",
+			"error":   "failed to create checkout session",
+			"details": err.Error(),
+		})
+	}
+	if strings.TrimSpace(checkoutURL) == "" {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+			"error": "billing provider returned an empty checkout URL",
+		})
+	}
+	parsedURL, err := url.Parse(checkoutURL)
+	if err != nil || parsedURL.Scheme != "https" || parsedURL.Host == "" {
+		return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{
+			"error": "billing provider returned an invalid checkout URL",
 		})
 	}
 
@@ -90,8 +102,8 @@ func (h *BillingHandler) GetSubscription(c *fiber.Ctx) error {
 	}
 
 	return c.JSON(fiber.Map{
-		"plan": 	          sub.Plan,
-		"status":   		  sub.Status,
+		"plan":               sub.Plan,
+		"status":             sub.Status,
 		"current_period_end": sub.CurrentPeriodEnd,
 	})
 }
