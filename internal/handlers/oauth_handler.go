@@ -325,19 +325,28 @@ func (h *OAuthHandler) findOrCreateOAuthUser(c *fiber.Ctx, email, name, provider
 	}
 
 	var user models.User
-	result := h.DB.Where("provider = ? AND provider_id = ?", provider, providerID).First(&user)
+	var identity models.OAuthIdentity
+	result := h.DB.Where("provider = ? AND provider_id = ?", provider, providerID).Preload("User").First(&identity)
 	if result.Error == nil {
+		return h.redirectOAuthUser(c, identity.User)
+	}
+
+	// Support users created before OAuthIdentity was introduced.
+	result = h.DB.Where("provider = ? AND provider_id = ?", provider, providerID).First(&user)
+	if result.Error == nil {
+		identity = models.OAuthIdentity{UserID: user.ID, Provider: provider, ProviderID: providerID}
+		if err := h.DB.Create(&identity).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to link oauth account"})
+		}
 		return h.redirectOAuthUser(c, user)
 	}
 
 	result = h.DB.Where("email = ?", email).First(&user)
 	if result.Error == nil {
-		if user.Provider != provider || user.ProviderID != providerID {
-			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
-				"error": "email already registered with another sign-in provider",
-			})
+		identity = models.OAuthIdentity{UserID: user.ID, Provider: provider, ProviderID: providerID}
+		if err := h.DB.Create(&identity).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to link oauth account"})
 		}
-
 		return h.redirectOAuthUser(c, user)
 	}
 
@@ -352,6 +361,11 @@ func (h *OAuthHandler) findOrCreateOAuthUser(c *fiber.Ctx, email, name, provider
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to create user",
 		})
+	}
+
+	identity = models.OAuthIdentity{UserID: user.ID, Provider: provider, ProviderID: providerID}
+	if err := h.DB.Create(&identity).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to link oauth account"})
 	}
 
 	return h.redirectOAuthUser(c, user)

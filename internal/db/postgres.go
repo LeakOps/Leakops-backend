@@ -1,6 +1,6 @@
 package db
 
-import(
+import (
 	"log"
 
 	"Leakops-backend/internal/models"
@@ -8,7 +8,6 @@ import(
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
 )
-
 
 func ConnectDB(dsn string) *gorm.DB {
 	database, err := gorm.Open(postgres.Open(dsn), &gorm.Config{})
@@ -22,6 +21,7 @@ func ConnectDB(dsn string) *gorm.DB {
 	// Auto-migrate all models - create tables if they don't exist
 	err = database.AutoMigrate(
 		&models.User{},
+		&models.OAuthIdentity{},
 		&models.Customer{},
 		&models.GatewayAccount{},
 		&models.FailedPayment{},
