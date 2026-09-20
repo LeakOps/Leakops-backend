@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strconv"
 	"time"
 
@@ -16,8 +17,8 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"golang.org/x/oauth2"
-	"golang.org/x/oauth2/google"
 	"golang.org/x/oauth2/github"
+	"golang.org/x/oauth2/google"
 	"gorm.io/gorm"
 )
 
@@ -31,12 +32,11 @@ type OAuthHandler struct {
 	FrontendURL  string
 }
 
-
 func NewOAuthHandler(db *gorm.DB, cfg *config.Config) *OAuthHandler {
 	googleConfig := &oauth2.Config{
 		ClientID:     cfg.GoogleClientID,
 		ClientSecret: cfg.GoogleClientSecret,
-		RedirectURL:  "http://127.0.0.1:8080/api/v1/auth/google/callback",
+		RedirectURL:  cfg.GoogleRedirectURL,
 		Scopes:       []string{"https://www.googleapis.com/auth/userinfo.email", "https://www.googleapis.com/auth/userinfo.profile"},
 		Endpoint:     google.Endpoint,
 	}
@@ -44,7 +44,7 @@ func NewOAuthHandler(db *gorm.DB, cfg *config.Config) *OAuthHandler {
 	githubConfig := &oauth2.Config{
 		ClientID:     cfg.GithubClientID,
 		ClientSecret: cfg.GithubClientSecret,
-		RedirectURL:  "http://127.0.0.1:8080/api/v1/auth/github/callback",
+		RedirectURL:  cfg.GithubRedirectURL,
 		Scopes:       []string{"read:user", "user:email"},
 		Endpoint:     github.Endpoint,
 	}
@@ -56,6 +56,11 @@ func NewOAuthHandler(db *gorm.DB, cfg *config.Config) *OAuthHandler {
 		GithubConfig: githubConfig,
 		FrontendURL:  cfg.FrontendURL,
 	}
+}
+
+func oauthCookieSecure(redirectURL string) bool {
+	parsed, err := url.Parse(redirectURL)
+	return err == nil && parsed.Scheme == "https"
 }
 
 // generateState is a random, unguessable state string which is used for CSRF protection
@@ -74,7 +79,6 @@ func (h *OAuthHandler) GoogleLogin(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to start oauth flow"})
 	}
- 
 
 	// Storing cookie in httpOnly to verify callback
 	c.Cookie(&fiber.Cookie{
@@ -82,15 +86,13 @@ func (h *OAuthHandler) GoogleLogin(c *fiber.Ctx) error {
 		Value:    state,
 		Expires:  time.Now().Add(10 * time.Minute),
 		HTTPOnly: true,
-		Secure:   true,
+		Secure:   oauthCookieSecure(h.GoogleConfig.RedirectURL),
 		SameSite: "Lax",
 	})
- 
+
 	url := h.GoogleConfig.AuthCodeURL(state, oauth2.AccessTypeOffline)
 	return c.Redirect(url)
 }
-
-
 
 type googleUserInfo struct {
 	Email string `json:"email"`
@@ -159,7 +161,6 @@ func (h *OAuthHandler) GoogleCallback(c *fiber.Ctx) error {
 	return h.findOrCreateOAuthUser(c, info.Email, info.Name, info.ID, models.ProviderGoogle)
 }
 
-
 // --- GitHub ---
 
 func (h *OAuthHandler) GithubLogin(c *fiber.Ctx) error {
@@ -171,12 +172,12 @@ func (h *OAuthHandler) GithubLogin(c *fiber.Ctx) error {
 	}
 
 	c.Cookie(&fiber.Cookie{
-		Name:  		"oauth_state_github",
-		Value: 		state,
-		Expires: 	time.Now().Add(10 *time.Minute),
-		HTTPOnly: 	true,
-		Secure: 	true,
-		SameSite: 	"Lax",
+		Name:     "oauth_state_github",
+		Value:    state,
+		Expires:  time.Now().Add(10 * time.Minute),
+		HTTPOnly: true,
+		Secure:   oauthCookieSecure(h.GithubConfig.RedirectURL),
+		SameSite: "Lax",
 	})
 
 	url := h.GithubConfig.AuthCodeURL(state)
@@ -184,10 +185,10 @@ func (h *OAuthHandler) GithubLogin(c *fiber.Ctx) error {
 }
 
 type githubUserInfo struct {
-	Login 		string		`json:"login"`
-	Name		string		`json:"name"`
-	ID 			int			`json:"id"`
-	Email		string		`json:"email"`
+	Login string `json:"login"`
+	Name  string `json:"name"`
+	ID    int    `json:"id"`
+	Email string `json:"email"`
 }
 
 func (h *OAuthHandler) GithubCallback(c *fiber.Ctx) error {
@@ -274,7 +275,6 @@ func (h *OAuthHandler) GithubCallback(c *fiber.Ctx) error {
 	return h.findOrCreateOAuthUser(c, email, name, providerID, models.ProviderGithub)
 }
 
-
 func (h *OAuthHandler) fetchGithubEmail(ctx context.Context, client *http.Client) string {
 	req, err := http.NewRequestWithContext(ctx, "GET", "https://api.github.com/user/emails", nil)
 
@@ -293,8 +293,8 @@ func (h *OAuthHandler) fetchGithubEmail(ctx context.Context, client *http.Client
 	}
 
 	var emails []struct {
-		Email 		string		`json:"email"`
-		Primary		bool		`json:"primary"`
+		Email   string `json:"email"`
+		Primary bool   `json:"primary"`
 	}
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -315,7 +315,6 @@ func (h *OAuthHandler) fetchGithubEmail(ctx context.Context, client *http.Client
 	return ""
 }
 
-
 // --- Shared logic ---
 
 func (h *OAuthHandler) findOrCreateOAuthUser(c *fiber.Ctx, email, name, providerID string, provider models.AuthProvider) error {
@@ -331,14 +330,14 @@ func (h *OAuthHandler) findOrCreateOAuthUser(c *fiber.Ctx, email, name, provider
 	if result.RowsAffected == 0 {
 		// make a new user
 		user = models.User{
-			Name: 		name,
-			Email: 		email,
-			Provider: 	provider,
+			Name:       name,
+			Email:      email,
+			Provider:   provider,
 			ProviderID: providerID,
 		}
 
 		if err := h.DB.Create(&user).Error; err != nil {
-			c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 				"error": "failed to create user",
 			})
 		}
@@ -356,4 +355,3 @@ func (h *OAuthHandler) findOrCreateOAuthUser(c *fiber.Ctx, email, name, provider
 	redirectURL := fmt.Sprintf("%s/auth/callback?token=%s", h.FrontendURL, token)
 	return c.Redirect(redirectURL)
 }
-
