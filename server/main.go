@@ -34,9 +34,8 @@ func main() {
 	// Register all Routes
 	routes.SetupRoutes(app, database, cfg)
 
-
 	// Starting retry engine in background (Day 1/3/7 retries + dunning emails)
-	dunningSvc := email.NewDunningService(cfg.ResendAPIKey, cfg.ResendFromEmail)
+	dunningSvc := email.NewDunningService(cfg.ResendAPIKey, cfg.ResendFromEmail, cfg.FeedbackToEmail)
 	retryEngine := retry.NewEngine(database, cfg.EncryptionKey, dunningSvc)
 	go retryEngine.Start()
 
