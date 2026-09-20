@@ -1,26 +1,26 @@
 package email
 
-import(
+import (
 	"fmt"
+	"html"
 	"strings"
 
 	"github.com/resend/resend-go/v4"
 )
 
-
 type DunningService struct {
-	client 			*resend.Client
-	fromEmail		string
+	client          *resend.Client
+	fromEmail       string
+	feedbackToEmail string
 }
 
-
-func NewDunningService(apiKey string, fromEmail string) *DunningService {
+func NewDunningService(apiKey string, fromEmail string, feedbackToEmail string) *DunningService {
 	return &DunningService{
-		client:   	resend.NewClient(apiKey),
-		fromEmail: 	fromEmail,
+		client:          resend.NewClient(apiKey),
+		fromEmail:       fromEmail,
+		feedbackToEmail: feedbackToEmail,
 	}
 }
-
 
 func (d *DunningService) SendPaymentFailedEmail(toEmail, customerName string, amountCents int64, currency string) error {
 	if toEmail == "" {
@@ -47,13 +47,38 @@ func (d *DunningService) SendPaymentFailedEmail(toEmail, customerName string, am
 	`, name, amount, strings.ToUpper(currency))
 
 	params := &resend.SendEmailRequest{
-		From: 	d.fromEmail,
-		To: 	[]string{toEmail},
+		From:    d.fromEmail,
+		To:      []string{toEmail},
 		Subject: "Your payment failed — action needed",
-		Html: 	 html,
+		Html:    html,
 	}
 
 	_, err := d.client.Emails.Send(params)
 	return err
 }
 
+func (d *DunningService) SendFeedbackNotification(name, email, message string) error {
+	if d.feedbackToEmail == "" {
+		return fmt.Errorf("feedback recipient email is empty")
+	}
+
+	html := fmt.Sprintf(`
+		<div style="font-family: sans-serif; max-width: 500px;">
+			<h2>New Feedback Received</h2>
+			<p><strong>From:</strong> %s (%s)</p>
+			<p><strong>Message:</strong></p>
+			<p>%s</p>
+		</div>
+	`, html.EscapeString(name), html.EscapeString(email), html.EscapeString(message))
+
+	params := &resend.SendEmailRequest{
+		From:    d.fromEmail,
+		To:      []string{d.feedbackToEmail},
+		Subject: "New LeakOps Feedback",
+		Html:    html,
+	}
+
+	_, err := d.client.Emails.Send(params)
+
+	return err
+}
