@@ -96,6 +96,12 @@ func (h *BillingWebhookHandler) upsertSubscription(event dodoBillingEvent, statu
 	}
 
 	plan := h.planFromProductID(event.Data.ProductID)
+	var currentPeriodEnd *time.Time
+	if event.Data.NextBillingDate != "" {
+		if parsed, err := time.Parse(time.RFC3339, event.Data.NextBillingDate); err == nil {
+			currentPeriodEnd = &parsed
+		}
+	}
 
 	var sub models.Subscription
 	result := h.DB.Where("user_id = ?", user.ID).First(&sub)
@@ -108,6 +114,7 @@ func (h *BillingWebhookHandler) upsertSubscription(event dodoBillingEvent, statu
 			Status:             status,
 			DodoSubscriptionID: event.Data.SubscriptionID,
 			DodoCustomerID:     event.Data.CustomerID,
+			CurrentPeriodEnd:   currentPeriodEnd,
 		}
 
 		if err := h.DB.Create(&sub).Error; err != nil {
