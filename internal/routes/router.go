@@ -19,7 +19,7 @@ func SetupRoutes(app *fiber.App, database *gorm.DB, cfg *config.Config) {
 	webhookHandler := handlers.NewWebhookHandler(database, cfg.EncryptionKey)
 	dashboardHandler := handlers.NewDashboardHandler(database)
 
-	paymentSvc := services.NewPaymentService(cfg.LeakopsDodoAPIKey, cfg.LeakopsDodoTestMode)
+	paymentSvc := services.NewPaymentService(cfg.LeakopsDodoAPIKey, cfg.LeakopsDodoLiveMode)
 	billingHandler := handlers.NewBillingHandler(database, paymentSvc, cfg.FrontendURL, cfg.DodoProductStarter, cfg.DodoProductGrowth, cfg.DodoProductScale)
 	BillingWebhookHandler := handlers.NewBillingWebhookHandler(database, cfg.LeakopsDodoWebhookSecret, cfg.DodoProductStarter, cfg.DodoProductGrowth, cfg.DodoProductScale)
 
