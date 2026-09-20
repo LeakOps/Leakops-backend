@@ -33,7 +33,7 @@ type Config struct {
 
 	LeakopsDodoAPIKey     	 string
 	LeakopsDodoWebhookSecret string
-	LeakopsDodoTestMode   bool
+	LeakopsDodoLiveMode   bool
 
 	DodoProductStarter 	  string
 	DodoProductGrowth  	  string
@@ -114,7 +114,7 @@ func LoadConfig() *Config {
 		// Dodo billing
 		LeakopsDodoAPIKey:   os.Getenv("LEAKOPS_DODO_API_KEY"),
 		LeakopsDodoWebhookSecret: os.Getenv("LEAKOPS_DODO_WEBHOOK_SECRET"),
-		LeakopsDodoTestMode: strings.EqualFold(os.Getenv("LEAKOPS_DODO_ENVIRONMENT"), "test"),
+		LeakopsDodoLiveMode: strings.EqualFold(os.Getenv("LEAKOPS_DODO_ENVIRONMENT"), "live"),
 
 		// Plans
 		DodoProductStarter: os.Getenv("DODO_PRODUCT_STARTER"),
