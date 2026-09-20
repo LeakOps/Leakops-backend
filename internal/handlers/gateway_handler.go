@@ -8,11 +8,13 @@ import (
 
 	"Leakops-backend/internal/gateway"
 	"Leakops-backend/internal/models"
+	"Leakops-backend/internal/services"
 	"Leakops-backend/internal/utils"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type GatewayHandler struct {
@@ -37,6 +39,8 @@ type ConnectGatewayRequest struct {
 // key would be stored in full as "last four" — i.e. the whole secret sitting in
 // plaintext in a column meant to be safe to display.
 const minAPIKeyLength = 8
+
+var errGatewayLimitReached = errors.New("gateway limit reached")
 
 // getUserID safely pulls the authenticated user's ID out of locals.
 // Panic-proof: if middleware locals is not set, it returns 401.
@@ -98,6 +102,30 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 		})
 	}
 
+	plan, err := services.UserPlan(h.DB, userID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to load subscription",
+		})
+	}
+	limits := services.LimitsForPlan(plan)
+	if limits.MaxGateways > 0 {
+		var gatewayCount int64
+		if err := h.DB.Model(&models.GatewayAccount{}).Where("user_id = ?", userID).Count(&gatewayCount).Error; err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "failed to check gateway limit",
+			})
+		}
+		if gatewayCount >= int64(limits.MaxGateways) {
+			return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+				"error":        "gateway_limit_reached",
+				"message":      "your current plan does not allow another payment gateway",
+				"current_plan": plan,
+				"limit":        limits.MaxGateways,
+			})
+		}
+	}
+
 	// Duplicate check: same user, same gateway type already connected?
 	// Non-"not found" errors (DB down, connection reset) return 500 instead
 	// of silently falling through and creating a second row.
@@ -114,7 +142,6 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 			"error": "failed to connect gateway",
 		})
 	}
-
 
 	encryptedKey, err := utils.Encrypt(req.APIKey, h.EncryptionKey)
 	if err != nil {
@@ -138,10 +165,37 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 		ConnectedAt:    time.Now(),
 	}
 
-	if err := h.DB.Create(&gatewayAccount).Error; err != nil {
+	createErr := h.DB.Transaction(func(tx *gorm.DB) error {
+		// Serialize gateway creation per user so two concurrent requests cannot
+		// both pass the plan's gateway-count check.
+		var lockedUser models.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&lockedUser, "id = ?", userID).Error; err != nil {
+			return err
+		}
+
+		if limits.MaxGateways > 0 {
+			var gatewayCount int64
+			if err := tx.Model(&models.GatewayAccount{}).Where("user_id = ?", userID).Count(&gatewayCount).Error; err != nil {
+				return err
+			}
+			if gatewayCount >= int64(limits.MaxGateways) {
+				return errGatewayLimitReached
+			}
+		}
+
+		return tx.Create(&gatewayAccount).Error
+	})
+	if errors.Is(createErr, errGatewayLimitReached) {
+		return c.Status(fiber.StatusForbidden).JSON(fiber.Map{
+			"error":        "gateway_limit_reached",
+			"message":      "your current plan does not allow another payment gateway",
+			"current_plan": plan,
+			"limit":        limits.MaxGateways,
+		})
+	}
+	if createErr != nil {
 		// The composite unique index on (user_id, gateway_type) is the real
-		// guarantee against duplicates — the SELECT above can lose a race
-		// between two concurrent requests. Report that race as a 409, not a 500.
+		// guarantee against duplicates. Report that race as a 409, not a 500.
 		return c.Status(fiber.StatusConflict).JSON(fiber.Map{
 			"error": "gateway already connected, disconnect it first",
 		})
@@ -150,7 +204,6 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 	// Step 2: build the webhook URL — it depends on this record's ID, so it
 	// can only be built after creation.
 	webhookURL := h.BaseURL + "/api/v1/webhook/" + req.GatewayType + "/" + gatewayAccount.ID.String()
-
 
 	// Step 3: register the webhook with the gateway API. We use the plaintext
 	// req.APIKey here (the encrypted version is already stored in the DB).
@@ -170,7 +223,6 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 		})
 	}
 
-
 	// Step 4: encrypt the secret and do a targeted UPDATE — not Save(), since
 	// that rewrites every column (APIKey/ConnectedAt too), which could
 	// clobber a concurrent change. Only touch the fields that actually change.
@@ -186,7 +238,7 @@ func (h *GatewayHandler) ConnectGateway(c *fiber.Ctx) error {
 		"webhook_secret": encryptedSecret,
 		"is_active":      true,
 	}).Error; err != nil {
-		h.DB.Delete(&gatewayAccount) 
+		h.DB.Delete(&gatewayAccount)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "failed to activate gateway",
 		})
@@ -336,4 +388,3 @@ func (h *GatewayHandler) DisconnectGateway(c *fiber.Ctx) error {
 
 	return c.JSON(fiber.Map{"message": "gateway disconnected"})
 }
-
