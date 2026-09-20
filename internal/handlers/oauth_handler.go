@@ -325,24 +325,39 @@ func (h *OAuthHandler) findOrCreateOAuthUser(c *fiber.Ctx, email, name, provider
 	}
 
 	var user models.User
-	result := h.DB.Where("email = ?", email).First(&user)
-
-	if result.RowsAffected == 0 {
-		// make a new user
-		user = models.User{
-			Name:       name,
-			Email:      email,
-			Provider:   provider,
-			ProviderID: providerID,
-		}
-
-		if err := h.DB.Create(&user).Error; err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"error": "failed to create user",
-			})
-		}
+	result := h.DB.Where("provider = ? AND provider_id = ?", provider, providerID).First(&user)
+	if result.Error == nil {
+		return h.redirectOAuthUser(c, user)
 	}
 
+	result = h.DB.Where("email = ?", email).First(&user)
+	if result.Error == nil {
+		if user.Provider != provider || user.ProviderID != providerID {
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error": "email already registered with another sign-in provider",
+			})
+		}
+
+		return h.redirectOAuthUser(c, user)
+	}
+
+	user = models.User{
+		Name:       name,
+		Email:      email,
+		Provider:   provider,
+		ProviderID: providerID,
+	}
+
+	if err := h.DB.Create(&user).Error; err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"error": "failed to create user",
+		})
+	}
+
+	return h.redirectOAuthUser(c, user)
+}
+
+func (h *OAuthHandler) redirectOAuthUser(c *fiber.Ctx, user models.User) error {
 	authHandler := &AuthHandler{DB: h.DB, JWTSecret: h.JWTSecret}
 	token, err := authHandler.generateToken(user.ID)
 	if err != nil {
