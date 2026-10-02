@@ -203,6 +203,3 @@ All endpoints are prefixed with `/api/v1`.
 6. **Open a Pull Request** against the `main` branch with a clear description of what you changed and why.
 7. For significant changes (new features, architecture changes), please open an issue first to discuss before submitting a PR.
 
-## License
-
-Specify your license here (e.g. MIT, Apache 2.0, or "All rights reserved" if proprietary).
