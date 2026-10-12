@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -323,6 +324,9 @@ func (h *OAuthHandler) findOrCreateOAuthUser(c *fiber.Ctx, email, name, provider
 			"error": "oauth provider returned incomplete user information",
 		})
 	}
+	if name == "" {
+		name = email
+	}
 
 	var user models.User
 	var identity models.OAuthIdentity
@@ -358,13 +362,20 @@ func (h *OAuthHandler) findOrCreateOAuthUser(c *fiber.Ctx, email, name, provider
 	}
 
 	if err := h.DB.Create(&user).Error; err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "failed to create user",
-		})
+		// Another callback may have created this email after the lookup above.
+		if lookupErr := h.DB.Where("email = ?", email).First(&user).Error; lookupErr != nil {
+			log.Printf("OAuth user creation failed for provider %q: %v", provider, err)
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to create user"})
+		}
 	}
 
 	identity = models.OAuthIdentity{UserID: user.ID, Provider: provider, ProviderID: providerID}
 	if err := h.DB.Create(&identity).Error; err != nil {
+		// A concurrent callback may have linked this provider identity already.
+		if lookupErr := h.DB.Where("provider = ? AND provider_id = ?", provider, providerID).Preload("User").First(&identity).Error; lookupErr == nil {
+			return h.redirectOAuthUser(c, identity.User)
+		}
+		log.Printf("OAuth identity creation failed for provider %q: %v", provider, err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "failed to link oauth account"})
 	}
 
