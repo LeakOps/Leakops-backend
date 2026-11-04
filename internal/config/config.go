@@ -55,7 +55,6 @@ func LoadConfig() *Config {
 		log.Println("No .env file found, reading from system env")
 	}
 
-	
 	frontendURL := os.Getenv("FRONTEND_URL")
 	if frontendURL == "" {
 		frontendURL = "http://localhost:3000" // local dev
@@ -128,7 +127,7 @@ func LoadConfig() *Config {
 		SupabaseS3AccessKeyID: os.Getenv("SUPABASE_S3_ACCESS_KEY_ID"),
 		SupabaseS3SecretKey:   os.Getenv("SUPABASE_S3_SECRET_ACCESS_KEY"),
 		SupabaseBucketName:    os.Getenv("SUPABASE_BUCKET_NAME"),
-		SupabasePublicURL:     os.Getenv("SUPABASE_PUBLIC_UR"),
+		SupabasePublicURL:     os.Getenv("SUPABASE_PUBLIC_URL"),
 	}
 
 	if cfg.DatabaseURL == "" {
